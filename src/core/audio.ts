@@ -15,7 +15,8 @@ class AudioEngine {
 
   unlock() {
     if (this.ctx) {
-      if (this.ctx.state === 'suspended') this.ctx.resume();
+      // iOS Safari también deja el contexto en 'interrupted' (llamadas, bloqueo de pantalla)
+      if (this.ctx.state !== 'running') this.ctx.resume().catch(() => {});
       return;
     }
     const AC = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -39,6 +40,18 @@ class AudioEngine {
     this.noise = ctx.createBuffer(1, len, ctx.sampleRate);
     const d = this.noise.getChannelData(0);
     for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    // iOS: un buffer silencioso dentro del gesto del usuario termina de desbloquear el audio
+    try {
+      const s = ctx.createBufferSource();
+      s.buffer = ctx.createBuffer(1, 1, 22050);
+      s.connect(ctx.destination);
+      s.start(0);
+    } catch { /* sin audio */ }
+    if (ctx.state !== 'running') ctx.resume().catch(() => {});
+    // Al volver a la pestaña (o tras una interrupción) reanudamos el contexto en el siguiente toque
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden && this.ctx && this.ctx.state !== 'running') this.ctx.resume().catch(() => {});
+    });
     this.startAmbience();
   }
 
@@ -128,7 +141,7 @@ class AudioEngine {
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
     src.connect(f).connect(g).connect(this.sfxBus);
-    src.start(t, Math.random() * 1.5, dur + 0.05);
+    src.start(t, Math.random() * Math.max(0, 1.9 - dur), dur + 0.05);
   }
 
   private tone(freq: number, dur: number, vol: number, type: OscillatorType = 'sine', delay = 0, slideTo?: number) {

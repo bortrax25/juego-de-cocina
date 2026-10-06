@@ -31,6 +31,7 @@ export class Engine {
   pointer = new THREE.Vector2(); // NDC
   pointerPx = new THREE.Vector2();
   pointerDown = false;
+  private activeId = -1;
   private downH = new Set<(e: PointerEvent) => void>();
   private moveH = new Set<(e: PointerEvent) => void>();
   private upH = new Set<(e: PointerEvent) => void>();
@@ -43,6 +44,8 @@ export class Engine {
   private frameAcc = 0;
   private frameCount = 0;
   private lastT = 0;
+  private upBlockedUntil = 0; // no subir resolución antes de este instante (anti-oscilación)
+  private downCount = 0;
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -64,22 +67,30 @@ export class Engine {
     window.addEventListener('resize', () => this.resize());
 
     const c = this.canvas;
+    // Sólo seguimos un puntero a la vez: un segundo dedo no debe cortar ni duplicar el gesto.
     c.addEventListener('pointerdown', (e) => {
+      if (this.pointerDown) return;
       this.setPointer(e);
       this.pointerDown = true;
-      c.setPointerCapture(e.pointerId);
+      this.activeId = e.pointerId;
+      try { c.setPointerCapture(e.pointerId); } catch { /* puntero ya liberado */ }
       this.downH.forEach((h) => h(e));
     });
     c.addEventListener('pointermove', (e) => {
+      if (this.pointerDown && e.pointerId !== this.activeId) return;
       this.setPointer(e);
       this.moveH.forEach((h) => h(e));
     });
     const up = (e: PointerEvent) => {
+      if (this.pointerDown && e.pointerId !== this.activeId) return;
       this.setPointer(e);
       if (!this.pointerDown) return;
       this.pointerDown = false;
+      this.activeId = -1;
       this.upH.forEach((h) => h(e));
     };
+    c.addEventListener('lostpointercapture', up);
+    c.addEventListener('contextmenu', (e) => e.preventDefault());
     c.addEventListener('pointerup', up);
     c.addEventListener('pointercancel', up);
   }
@@ -216,8 +227,15 @@ export class Engine {
     this.frameAcc = 0;
     this.frameCount = 0;
     let next = this.dpr;
-    if (avg > 1 / 50) next = Math.max(0.6, this.dpr - 0.2);
-    else if (avg < 1 / 58 && this.dpr < this.maxDpr) next = Math.min(this.maxDpr, this.dpr + 0.1);
+    const now = performance.now();
+    if (avg > 1 / 50) {
+      next = Math.max(0.6, this.dpr - 0.2);
+      // Cada bajada alarga la espera antes de volver a subir (evita el sube/baja constante)
+      if (next < this.dpr) {
+        this.downCount++;
+        this.upBlockedUntil = now + Math.min(60000, 6000 * this.downCount);
+      }
+    } else if (avg < 1 / 58 && this.dpr < this.maxDpr && now > this.upBlockedUntil) next = Math.min(this.maxDpr, this.dpr + 0.1);
     if (Math.abs(next - this.dpr) > 0.01) {
       this.dpr = next;
       this.renderer.setPixelRatio(next);

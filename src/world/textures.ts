@@ -18,6 +18,17 @@ function tex(c: HTMLCanvasElement, repeat = 1, srgb = true) {
   return t;
 }
 
+/** Memoiza texturas pedidas muchas veces (evita un CanvasTexture nuevo por llamada). */
+const memo = new Map<string, THREE.Texture>();
+function memoized<T extends THREE.Texture>(key: string, make: () => T): T {
+  let t = memo.get(key) as T | undefined;
+  if (!t) {
+    t = make();
+    memo.set(key, t);
+  }
+  return t;
+}
+
 function speckle(g: CanvasRenderingContext2D, w: number, h: number, n: number, alpha: number, light = false) {
   for (let i = 0; i < n; i++) {
     const v = light ? 255 : Math.floor(Math.random() * 60);
@@ -142,6 +153,9 @@ export function salmonFlesh(base = '#f07a4a', fat = 'rgba(255,230,210,0.75)') {
 
 /** Pescado blanco (lenguado/merluza). */
 export function whiteFish() {
+  return memoized('whiteFish', buildWhiteFish);
+}
+function buildWhiteFish() {
   const [c, g] = canvas(256);
   g.fillStyle = '#efe6dc';
   g.fillRect(0, 0, 256, 256);
@@ -157,6 +171,9 @@ export function whiteFish() {
 
 /** Pez espada: carne rosada pálida con anillos. */
 export function swordfish() {
+  return memoized('swordfish', buildSwordfish);
+}
+function buildSwordfish() {
   const [c, g] = canvas(256);
   g.fillStyle = '#f2c2b8';
   g.fillRect(0, 0, 256, 256);
@@ -172,6 +189,9 @@ export function swordfish() {
 
 /** Etiqueta con texto (cinta de pintor verde/azul, como la del video). */
 export function labelTex(text: string, bg = '#bfe66a', fg = '#1d2a12', w = 256, h = 64) {
+  return memoized(`label|${text}|${bg}|${fg}|${w}|${h}`, () => buildLabel(text, bg, fg, w, h));
+}
+function buildLabel(text: string, bg: string, fg: string, w: number, h: number) {
   const [c, g] = canvas(w, h);
   g.fillStyle = bg;
   g.fillRect(0, 0, w, h);
@@ -185,6 +205,9 @@ export function labelTex(text: string, bg = '#bfe66a', fg = '#1d2a12', w = 256, 
 
 /** Pantalla del reloj checador. */
 export function terminalScreen(lines: string[]) {
+  return memoized(`term|${lines.join('|')}`, () => buildTerminal(lines));
+}
+function buildTerminal(lines: string[]) {
   const [c, g] = canvas(256, 192);
   const grd = g.createLinearGradient(0, 0, 0, 192);
   grd.addColorStop(0, '#2b4a6d');
@@ -217,6 +240,9 @@ export function paintCanvas(size = 256) {
 
 /** Sprite radial suave para partículas (vapor, harina, fuego). */
 export function softDot() {
+  return memoized('softDot', buildSoftDot);
+}
+function buildSoftDot() {
   const [c, g] = canvas(64);
   const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
   grd.addColorStop(0, 'rgba(255,255,255,1)');

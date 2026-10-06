@@ -63,8 +63,9 @@ export class UI {
     const appr = h('div', 'hud-appr', '<span class="lbl">CHEF</span><div class="bar"><i></i></div><b>70</b>');
     this.apprFill = appr.querySelector('i')!;
     this.apprVal = appr.querySelector('b')!;
-    const pause = h('button', 'hud-btn', '❚❚');
+    const pause = h('button', 'hud-btn', '<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor"/><rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor"/></svg>');
     pause.setAttribute('aria-label', 'Pausa');
+    pause.type = 'button';
     pause.onclick = () => this.onPause();
     const left = h('div', 'hud-left');
     left.append(this.dayEl, appr);
@@ -207,9 +208,9 @@ export class UI {
   }
 
   flash() {
-    this.flashEl.classList.remove('go');
+    this.flashEl.classList.remove('on');
     void this.flashEl.offsetWidth;
-    this.flashEl.classList.add('go');
+    this.flashEl.classList.add('on');
   }
 
   gauge(vertical = false): Gauge {
