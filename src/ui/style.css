@@ -135,7 +135,7 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; background: 
 .ring[data-s=ready] { animation: ringP 0.5s ease-in-out infinite alternate; }
 .ring[data-s=burn] .fg { stroke: var(--bad); }
 .ring[data-s=idle] span { font-size: 24px; font-weight: 400; }
-@keyframes ringP { to { transform: var(--t, none) scale(1.08); } }
+@keyframes ringP { to { scale: 1.1; } }
 
 .tag { position: absolute; left: 0; top: 0; padding: 3px 8px; margin: -12px 0 0 0; border-radius: 999px; background: var(--glass); font-size: 12px; font-family: var(--cond); letter-spacing: 0.05em; white-space: nowrap; translate: -50% 0; }
 .tag.hint { width: 22px; height: 22px; padding: 0; display: grid; place-items: center; background: rgba(242,201,76,0.95); color: #1a1a1a; font-size: 10px; animation: hint 0.9s ease-in-out infinite alternate; }
@@ -213,3 +213,10 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; background: 
   .in-task .prep { opacity: 0; transform: translateY(30px); }
   .in-task .chef-say, .in-task .sort-btns { bottom: calc(16px + var(--safe-b)); }
 }
+
+/* ---------- v2: botón de interacción contextual ---------- */
+.prompt { position: absolute; left: 50%; bottom: calc(28px + var(--safe-b)); transform: translate(-50%, 20px) scale(0.92); display: flex; align-items: center; gap: 10px; padding: 10px 18px 10px 10px; border-radius: 999px; background: rgba(250, 250, 248, 0.96); color: #12151a; font-weight: 600; font-size: 15px; box-shadow: 0 12px 34px rgba(0,0,0,0.35); opacity: 0; transition: opacity 0.2s, transform 0.25s cubic-bezier(.2,1.4,.4,1); pointer-events: none !important; white-space: nowrap; }
+.prompt.show { opacity: 1; transform: translate(-50%, 0) scale(1); pointer-events: auto !important; animation: promptPulse 1.6s ease-in-out infinite; }
+.prompt kbd { font-family: var(--cond); font-size: 13px; letter-spacing: 0.08em; background: #12151a; color: #ffc94a; border-radius: 999px; padding: 6px 10px; }
+@keyframes promptPulse { 50% { box-shadow: 0 12px 34px rgba(0,0,0,0.35), 0 0 0 8px rgba(255, 201, 74, 0.25); } }
+@media (max-width: 760px) { .prompt { bottom: calc(30vh + 22px + var(--safe-b)); font-size: 14px; } }

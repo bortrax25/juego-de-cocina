@@ -85,6 +85,26 @@ export class UI {
     root.append(hud, this.caption, this.instr, this.progress, this.listWrap, this.toasts, this.chef, this.flashEl, this.screen);
   }
 
+  private promptEl: HTMLButtonElement | null = null;
+  private promptCb: (() => void) | null = null;
+  private promptText = '';
+  /** Botón de interacción contextual (cerca de una estación con ticket). */
+  setPrompt(text: string | null, cb?: () => void) {
+    if (!this.promptEl) {
+      const b = h('button', 'prompt');
+      b.onclick = () => this.promptCb?.();
+      this.root.append(b);
+      this.promptEl = b;
+    }
+    this.promptCb = cb ?? null;
+    const t = text ?? '';
+    if (t === this.promptText) return;
+    this.promptText = t;
+    const touch = matchMedia('(pointer: coarse)').matches;
+    this.promptEl.innerHTML = t ? `<kbd>${touch ? 'TOCA' : 'E'}</kbd><span>${t}</span>` : '';
+    this.promptEl.classList.toggle('show', !!t);
+  }
+
   /** Durante un minijuego la lista se repliega para dejar ver la estación. */
   setInTask(v: boolean) {
     this.root.classList.toggle('in-task', v);

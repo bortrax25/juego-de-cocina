@@ -24,7 +24,7 @@ interface Step {
 
 /**
  * Tareas de secuencia: fichar, ponerse el uniforme, mise en place, armar el fondo en orden,
- * copiar recetas, despedidas del último día. Toques simples, mucha atmósfera.
+ * copiar recetas, despedidas del último día. Toques simples con respuesta física: lo que señalas se eleva, al tocar se hunde y rebota.
  */
 export class SequenceGame extends Minigame {
   private kind: Kind;
@@ -38,6 +38,9 @@ export class SequenceGame extends Minigame {
   private now: number;
   private tmpP = new THREE.Vector3();
   private padMat = new THREE.MeshBasicMaterial({ visible: false });
+  // feedback de hover/presión: desplazamientos aditivos que se pueden retirar sin dejar rastro
+  private hover: THREE.Object3D | null = null;
+  private offs3 = new Map<THREE.Object3D, { y: number; s: number }>();
 
   constructor(ctx: MGContext) {
     super(ctx);
@@ -240,10 +243,15 @@ export class SequenceGame extends Minigame {
   private async vanish(o: THREE.Object3D, sfx: 'whoosh' | 'scrape' | 'good' | 'thud') {
     audio.play(sfx);
     const s0 = o.scale.clone(), p0 = o.position.clone();
-    await tween(0.3, (k) => {
-      o.scale.copy(s0).multiplyScalar(1 - k);
-      o.position.set(p0.x, p0.y + k * 0.06, p0.z + k * 0.2);
+    // anticipación: se infla un poco y sale en arco hacia ti girando
+    await tween(0.08, (k) => o.scale.copy(s0).multiplyScalar(1 + 0.12 * k), ease.outCubic);
+    const r0 = o.rotation.z;
+    await tween(0.32, (k) => {
+      o.scale.copy(s0).multiplyScalar(1.12 * (1 - k));
+      o.position.set(p0.x, p0.y + Math.sin(k * Math.PI * 0.7) * 0.1, p0.z + k * 0.22);
+      o.rotation.z = r0 + k * (p0.x < 0 ? 0.6 : -0.6);
     }, ease.inCubic);
+    this.fx.sparkle(o.getWorldPosition(this.tmpP), '#ffffff', 6);
     o.visible = false;
   }
 
@@ -281,7 +289,78 @@ export class SequenceGame extends Minigame {
     this.showStep();
   }
 
+  private isLocal(o: THREE.Object3D) {
+    for (let c: THREE.Object3D | null = o; c; c = c.parent) if (c === this.group) return true;
+    return false;
+  }
+
+  /** Aplica (o retira) el realce de un objeto local: se eleva y crece un poco. */
+  private setLift(o: THREE.Object3D, y: number, sc: number) {
+    let st = this.offs3.get(o);
+    if (!st) this.offs3.set(o, (st = { y: 0, s: 1 }));
+    o.position.y += y - st.y;
+    o.scale.multiplyScalar(sc / st.s);
+    st.y = y;
+    st.s = sc;
+  }
+
+  private clearLifts() {
+    this.offs3.forEach((_, o) => this.setLift(o, 0, 1));
+    this.offs3.clear();
+  }
+
+  private pickTarget(): { o: THREE.Object3D; hit: THREE.Intersection } | null {
+    const s = this.steps[this.si];
+    if (!s) return null;
+    // ignoramos los objetos ocultos (el rayo no mira `visible`)
+    for (const h of this.eng.hit(s.targets, true)) {
+      let c: THREE.Object3D | null = h.object;
+      while (c && !s.targets.includes(c)) c = c.parent;
+      if (c && c.visible) return { o: c, hit: h };
+    }
+    return null;
+  }
+
+  protected onMove() {
+    if (this.busy) return;
+    const r = this.pickTarget();
+    this.hover = r ? r.o : null;
+  }
+
+  private async press(o: THREE.Object3D) {
+    const tag = this.tags.find((t) => t.obj === o);
+    if (tag) tag.t.el.style.scale = '1.5';
+    if (!this.isLocal(o)) {
+      this.haptic(8);
+      await tween(0.12, () => {}, ease.linear);
+      if (tag) tag.t.el.style.scale = '';
+      return;
+    }
+    // "botón" físico: se hunde y rebota antes de la acción
+    this.setLift(o, 0, 1);
+    this.offs3.delete(o);
+    this.haptic(8);
+    const y0 = o.position.y;
+    await tween(0.07, (k) => (o.position.y = y0 - 0.01 * k), ease.outCubic);
+    await tween(0.08, (k) => (o.position.y = y0 - 0.01 * (1 - k)), ease.outBack);
+    this.squash(o, 0.12, 0.22);
+  }
+
+  private wrong(o: THREE.Object3D) {
+    this.haptic([15, 30, 15]);
+    const tag = this.tags.find((t) => t.obj === o);
+    if (tag) {
+      tag.t.el.style.scale = '0.8';
+      setTimeout(() => (tag.t.el.style.scale = ''), 180);
+    }
+    if (!this.isLocal(o)) return;
+    const r0 = o.rotation.z;
+    tween(0.3, (k) => (o.rotation.z = r0 + Math.sin(k * Math.PI * 4) * 0.08 * (1 - k)), ease.linear);
+  }
+
   private showStep() {
+    this.clearLifts();
+    this.hover = null;
     const s = this.steps[this.si];
     this.hits.clear();
     this.oi = 0;
@@ -302,27 +381,23 @@ export class SequenceGame extends Minigame {
   protected async onDown() {
     if (this.busy) return;
     const s = this.steps[this.si];
-    // ignoramos los objetos ocultos (el rayo no mira `visible`)
-    let hit: THREE.Intersection | undefined;
-    let o: THREE.Object3D | null = null;
-    for (const h of this.eng.hit(s.targets, true)) {
-      let c: THREE.Object3D | null = h.object;
-      while (c && !s.targets.includes(c)) c = c.parent;
-      if (c && c.visible) { hit = h; o = c; break; }
-    }
-    if (!hit || !o) return;
+    const r = this.pickTarget();
+    if (!r) return;
+    const { o, hit } = r;
     const at = this.group.worldToLocal(hit.point.clone());
     const need = s.need ?? s.targets;
     let complete = true; // ¿este objeto ya no necesita más toques?
     if (s.order) {
       if (s.order[this.oi] !== o) {
         this.score(0.1, at);
+        this.wrong(o);
         this.ui.toast(`Orden incorrecto. Sigue: ${s.labels?.get(s.order[this.oi]) ?? ''}`, 'bad');
         return;
       }
       this.oi++;
     } else if (!need.includes(o)) {
       this.score(0.1, at);
+      this.wrong(o);
       this.ui.toast('Ese no es.', 'bad');
       return;
     } else if (s.repeat) {
@@ -336,6 +411,8 @@ export class SequenceGame extends Minigame {
     this.score(1, at, true);
     audio.play('click');
     this.busy = true;
+    this.hover = null;
+    await this.press(o);
     if (complete) {
       const tag = this.tags.find((t) => t.obj === o);
       tag?.t.remove();
@@ -358,6 +435,20 @@ export class SequenceGame extends Minigame {
   }
 
   protected update(dt: number) {
+    // hover: el objeto bajo el puntero se eleva y crece suave (sólo props locales)
+    const s = this.steps[this.si];
+    if (s && !this.busy) {
+      const k = Math.min(1, dt * 14);
+      for (const o of s.targets) {
+        if (!o.visible || !this.isLocal(o)) continue;
+        const st = this.offs3.get(o);
+        const on = o === this.hover;
+        const ty = on ? 0.015 : 0, ts = on ? 1.06 : 1;
+        const cy = st?.y ?? 0, cs = st?.s ?? 1;
+        if (Math.abs(ty - cy) + Math.abs(ts - cs) < 1e-4) continue;
+        this.setLift(o, cy + (ty - cy) * k, cs + (ts - cs) * k);
+      }
+    }
     for (const { obj, t } of this.tags) {
       if (!obj.visible && obj !== this.ctx.kitchen.terminal) {
         t.el.style.opacity = '0';
@@ -374,6 +465,7 @@ export class SequenceGame extends Minigame {
   }
 
   protected cleanup() {
+    this.clearLifts();
     this.tags.forEach((t) => t.t.remove());
     this.ui.setInstruction('');
     this.ui.setProgress(0, 0);

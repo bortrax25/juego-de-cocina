@@ -95,7 +95,7 @@ class Pool {
       this.s.setScalar(size * (0.4 + 0.6 * fade));
       this.m.compose(p.pos, cam.quaternion, this.s);
       this.mesh.setMatrixAt(n, this.m);
-      this.mesh.setColorAt(n, this.additive ? this.c.copy(p.color).multiplyScalar(fade) : p.color);
+      this.mesh.setColorAt(n, this.additive ? this.c.copy(p.color).multiplyScalar(fade * 1.8) : p.color);
       n++;
     }
     this.mesh.count = n;
