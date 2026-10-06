@@ -36,6 +36,8 @@ export class SequenceGame extends Minigame {
   private busy = false;
   private potLiquid?: THREE.Mesh;
   private now: number;
+  private tmpP = new THREE.Vector3();
+  private padMat = new THREE.MeshBasicMaterial({ visible: false });
 
   constructor(ctx: MGContext) {
     super(ctx);
@@ -65,8 +67,18 @@ export class SequenceGame extends Minigame {
       case 'clockout': {
         const hook = this.add(this.apronProp(), 0.42, 0.05, -0.1);
         hook.visible = false;
-        this.steps.push({ text: 'Ficha tu salida.', targets: [k.terminal], hint: true, onHit: () => this.punch('Salida registrada') });
-        this.steps.push({ text: 'Cuelga el delantal. Mañana otra vez.', targets: [hook], hint: true, onHit: (o) => { o.visible = true; audio.play('thud', 0.4); } });
+        this.steps.push({ text: 'Ficha tu salida.', targets: [k.terminal], hint: true, onHit: async () => {
+          this.punch('Salida registrada');
+          // el delantal aparece para colgarlo (si no, el objetivo del paso siguiente sería invisible)
+          hook.visible = true;
+          const s0 = hook.scale.clone();
+          await tween(0.25, (kk) => hook.scale.copy(s0).multiplyScalar(0.2 + 0.8 * kk), ease.outBack);
+        } });
+        this.steps.push({ text: 'Cuelga el delantal. Mañana otra vez.', targets: [hook], hint: true, onHit: async (o) => {
+          audio.play('thud', 0.4);
+          await tween(0.3, (kk) => (o.rotation.z = Math.sin(kk * Math.PI * 2) * 0.12 * (1 - kk)), ease.linear);
+          o.rotation.z = 0;
+        } });
         break;
       }
       case 'setup': {
@@ -77,13 +89,17 @@ export class SequenceGame extends Minigame {
           const kn = knife();
           kn.scale.setScalar(0.8 - i * 0.12);
           kn.rotation.set(-Math.PI / 2, 0, 0);
+          // zona de toque generosa (la hoja mide 2 mm de grosor)
+          const pad = new THREE.Mesh(new THREE.BoxGeometry(0.3, 0.1, 0.03), this.padMat);
+          pad.position.set(0.1, -0.02, 0.01);
+          kn.add(pad);
           this.add(kn, -0.17 + i * 0.01, 0.012, 0.0 + i * 0.05);
           knives.push(kn);
         }
         const t = towel(0.2, 0.14);
         this.add(t, 0.22, 0.01, 0.12);
         const all = [...knives, t];
-        this.steps.push({ text: 'Mise en place: saca tus cuchillos y el trapo húmedo.', targets: all, need: all, hint: true, onHit: (o) => this.slideTo(o, new THREE.Vector3(0.2 - all.indexOf(o) * 0.0, 0.012, -0.22 + all.indexOf(o) * 0.06)) });
+        this.steps.push({ text: 'Mise en place: saca tus cuchillos y el trapo húmedo.', targets: all, need: all, hint: true, onHit: (o) => this.slideTo(o, new THREE.Vector3(0.2, 0.012, -0.28 + all.indexOf(o) * 0.1)) });
         break;
       }
       case 'stock': {
@@ -141,7 +157,7 @@ export class SequenceGame extends Minigame {
           const pg = new THREE.Mesh(new THREE.PlaneGeometry(0.21, 0.28), mats().white);
           pg.rotation.x = -Math.PI / 2;
           pg.visible = false;
-          this.add(pg, -0.25 + i * 0.25, 0.0, 0.25);
+          this.add(pg, -0.25 + i * 0.25, -0.085, 0.36); // sobre la mesa, delante de la impresora
           pages.push(pg);
         }
         let printed = 0;
@@ -150,8 +166,8 @@ export class SequenceGame extends Minigame {
           const pg = pages[printed++];
           if (!pg) return;
           pg.visible = true;
-          const z0 = 0.0;
-          await tween(0.3, (kk) => (pg.position.z = z0 + 0.25 * kk));
+          const z0 = 0.1;
+          await tween(0.3, (kk) => (pg.position.z = z0 + 0.26 * kk));
         } });
         this.steps.push({ text: 'Revisa y copia cada receta en tu libreta.', targets: pages, need: pages, hint: true, onHit: (o) => this.vanish(o, 'scrape') });
         break;
@@ -286,11 +302,15 @@ export class SequenceGame extends Minigame {
   protected async onDown() {
     if (this.busy) return;
     const s = this.steps[this.si];
-    const hit = this.eng.hit(s.targets, true)[0];
-    if (!hit) return;
-    let o: THREE.Object3D | null = hit.object;
-    while (o && !s.targets.includes(o)) o = o.parent;
-    if (!o) return;
+    // ignoramos los objetos ocultos (el rayo no mira `visible`)
+    let hit: THREE.Intersection | undefined;
+    let o: THREE.Object3D | null = null;
+    for (const h of this.eng.hit(s.targets, true)) {
+      let c: THREE.Object3D | null = h.object;
+      while (c && !s.targets.includes(c)) c = c.parent;
+      if (c && c.visible) { hit = h; o = c; break; }
+    }
+    if (!hit || !o) return;
     const at = this.group.worldToLocal(hit.point.clone());
     const need = s.need ?? s.targets;
     let complete = true; // ¿este objeto ya no necesita más toques?
@@ -321,8 +341,11 @@ export class SequenceGame extends Minigame {
       tag?.t.remove();
       this.tags = this.tags.filter((t) => t !== tag);
     }
-    await s.onHit?.(o);
-    this.busy = false;
+    try {
+      await s.onHit?.(o);
+    } finally {
+      this.busy = false;
+    }
     this.ui.setProgress(this.oi, this.total(s));
     if (this.oi >= this.total(s)) {
       this.si++;
@@ -341,7 +364,7 @@ export class SequenceGame extends Minigame {
         continue;
       }
       t.el.style.opacity = '';
-      const p = obj.getWorldPosition(new THREE.Vector3());
+      const p = obj.getWorldPosition(this.tmpP);
       p.y += this.kind === 'goodbye' ? 1.9 : 0.09;
       const sp = this.eng.toScreen(p);
       t.move(sp.x, sp.y);

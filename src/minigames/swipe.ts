@@ -26,6 +26,7 @@ export class SwipeGame extends Minigame {
   private tailPan = hotelPan(0.22, 0.16, 0.05);
   private nh = 0;
   private nt = 0;
+  private tmpMid = new THREE.Vector3();
 
   constructor(ctx: MGContext) {
     super(ctx);
@@ -95,8 +96,14 @@ export class SwipeGame extends Minigame {
   }
 
   protected onMove() {
-    if (!this.start0 || this.busy) return;
+    if (this.busy || !this.eng.pointerDown) return;
     const p = this.pointerLocal(0.03);
+    if (!this.start0) {
+      // el dedo ya estaba apoyado cuando apareció la pieza (o tras el corte anterior)
+      this.start0 = p.clone();
+      this.last.copy(p);
+      return;
+    }
     // ¿el trazo last->p atravesó el cuerpo (eje z = neck.z)? medimos dónde lo cruzó en x
     const a = this.last.z - this.neck.z, b = p.z - this.neck.z;
     if (a * b <= 0 && Math.abs(p.z - this.last.z) > 1e-5) {
@@ -106,7 +113,7 @@ export class SwipeGame extends Minigame {
     }
     this.last.copy(p);
     // estela del cuchillo
-    const mid = this.start0.clone().lerp(p, 0.5);
+    const mid = this.tmpMid.copy(this.start0).lerp(p, 0.5);
     const len = this.start0.distanceTo(p);
     this.trail.position.set(mid.x, 0.06, mid.z);
     this.trail.scale.x = len;
