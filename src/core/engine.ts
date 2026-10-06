@@ -50,7 +50,7 @@ export class Engine {
 
   async init() {
     // WebGPU primero; si el navegador no lo soporta (o falló en una sesión previa) usamos WebGL2.
-    const forceWebGL = new URLSearchParams(location.search).has('webgl') || sessionStorage.getItem('mise-webgl') === '1' || !('gpu' in navigator);
+    const forceWebGL = new URLSearchParams(location.search).has('webgl') || readFlag() || !('gpu' in navigator);
     const renderer = new THREE.WebGPURenderer({ canvas: this.canvas, antialias: true, powerPreference: 'high-performance', forceWebGL });
     await renderer.init();
     this.renderer = renderer;
@@ -179,10 +179,14 @@ export class Engine {
 
   /** Si WebGPU falla en este navegador, recargamos una vez con el backend WebGL2. */
   fallback(err: unknown) {
-    if (this.backendName === 'WebGPU' && sessionStorage.getItem('mise-webgl') !== '1') {
+    if (this.backendName === 'WebGPU' && !readFlag()) {
       console.warn('WebGPU falló, usando WebGL2', err);
-      sessionStorage.setItem('mise-webgl', '1');
-      location.reload();
+      try {
+        sessionStorage.setItem('mise-webgl', '1');
+        location.reload();
+      } catch {
+        location.search = '?webgl';
+      }
       return;
     }
     throw err;
@@ -219,5 +223,13 @@ export class Engine {
       this.renderer.setPixelRatio(next);
       this.resize();
     }
+  }
+}
+
+function readFlag() {
+  try {
+    return sessionStorage.getItem('mise-webgl') === '1';
+  } catch {
+    return false;
   }
 }
