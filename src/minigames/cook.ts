@@ -39,6 +39,12 @@ export class CookGame extends Minigame {
   private c1: THREE.Color;
   private c2: THREE.Color;
   private flareT = rand(5, 9);
+  // temporales reutilizados en el bucle
+  private av = new THREE.Vector3();
+  private lv = new THREE.Vector3();
+  private wv = new THREE.Vector3();
+  private sv = new THREE.Vector2();
+  private up = new THREE.Vector3(0, 0.3, 0);
 
   constructor(ctx: MGContext) {
     super(ctx);
@@ -148,7 +154,9 @@ export class CookGame extends Minigame {
     // seleccionamos por cercanía en pantalla (cómodo en móvil)
     let best: Slot | null = null, bd = 1e9;
     for (const s of this.slots) {
-      const sp = this.eng.toScreen(this.worldOf(this.anchor(s)));
+      // sólo slots accionables: libres (si quedan tandas) o cocinándose
+      if (!(s.state === 'cook' || (s.state === 'idle' && this.started < this.total))) continue;
+      const sp = this.eng.toScreen(this.worldOf(this.anchor(s), this.wv), this.sv);
       const d = sp.distanceTo(this.eng.pointerPx);
       if (d < bd) { bd = d; best = s; }
     }
@@ -156,9 +164,10 @@ export class CookGame extends Minigame {
   }
 
   private anchor(s: Slot) {
-    if (this.kind === 'lobster') return s.state === 'cook' ? new THREE.Vector3(s.pos.x, 0.28, 0) : new THREE.Vector3(s.pos.x, 0.14, 0.36);
-    if (this.kind === 'fries') return new THREE.Vector3(s.pos.x, 0.3, 0.05);
-    return new THREE.Vector3(s.pos.x, 0.22, 0);
+    const a = this.av;
+    if (this.kind === 'lobster') return s.state === 'cook' ? a.set(s.pos.x, 0.28, 0) : a.set(s.pos.x, 0.14, 0.36);
+    if (this.kind === 'fries') return a.set(s.pos.x, 0.3, 0.05);
+    return a.set(s.pos.x, 0.22, 0);
   }
 
   protected onDown() {
@@ -243,8 +252,9 @@ export class CookGame extends Minigame {
     let anyCook = false;
     this.flareT -= dt;
     for (const s of this.slots) {
-      const a = this.worldOf(this.anchor(s));
-      const sp = this.eng.toScreen(a);
+      // sólo slots accionables: libres (si quedan tandas) o cocinándose
+      if (!(s.state === 'cook' || (s.state === 'idle' && this.started < this.total))) continue;
+      const sp = this.eng.toScreen(this.worldOf(this.anchor(s), this.wv), this.sv);
       s.ring.move(sp.x, sp.y);
       if (s.state !== 'cook') continue;
       anyCook = true;
@@ -257,15 +267,16 @@ export class CookGame extends Minigame {
       s.ring.set(Math.min(1, d), state);
       // efectos
       if (this.kind === 'fries') {
-        if (Math.random() < 0.7) this.fx.bubbles(this.worldOf(new THREE.Vector3(s.pos.x, 0.02, 0.05)), 0.09, 2);
-        if (d > 1.25 && Math.random() < 0.2) this.fx.emit({ pos: this.worldOf(new THREE.Vector3(s.pos.x, 0.05, 0.05)), vel: new THREE.Vector3(0, 0.3, 0), life: 1.2, size: 0.05, grow: 0.15, color: '#444', drag: 0.4 });
+        if (Math.random() < 0.7) this.fx.bubbles(this.worldOf(this.lv.set(s.pos.x, 0.02, 0.05), this.wv), 0.09, 2);
+        if (d > 1.25 && Math.random() < 0.2) this.fx.emit({ pos: this.worldOf(this.lv.set(s.pos.x, 0.05, 0.05), this.wv), vel: this.up, life: 1.2, size: 0.05, grow: 0.15, color: '#444', drag: 0.4 });
       } else if (this.kind === 'lobster') {
-        if (Math.random() < 0.25) this.fx.steam(this.worldOf(new THREE.Vector3(s.pos.x, 0.25, 0)));
-        if (Math.random() < 0.5) this.fx.bubbles(this.worldOf(new THREE.Vector3(s.pos.x, 0.2, 0)), 0.1, 1, '#ffffff');
-        s.obj.position.y = 0.17 + Math.sin(this.elapsed * 6 + s.pos.x * 30) * 0.005;
+        if (Math.random() < 0.25) this.fx.steam(this.worldOf(this.lv.set(s.pos.x, 0.25, 0), this.wv));
+        if (Math.random() < 0.5) this.fx.bubbles(this.worldOf(this.lv.set(s.pos.x, 0.2, 0), this.wv), 0.1, 1, '#ffffff');
+        // no pisar el arco de entrada (z llega a 0 al terminar la caída)
+        if (s.obj.position.z < 0.01) s.obj.position.y = 0.17 + Math.sin(this.elapsed * 6 + s.pos.x * 30) * 0.005;
       } else {
-        this.fx.fire(this.worldOf(new THREE.Vector3(s.pos.x, 0.03, 0)), 2, 0.9);
-        if (Math.random() < 0.3) this.fx.emit({ pos: this.worldOf(new THREE.Vector3(s.pos.x, 0.15, 0)), vel: new THREE.Vector3(0, 0.25, 0), velSpread: 0.05, life: 1.4, size: 0.04, grow: 0.15, color: '#b9b4ad', drag: 0.4 });
+        this.fx.fire(this.worldOf(this.lv.set(s.pos.x, 0.03, 0), this.wv), 2, 0.9);
+        if (Math.random() < 0.3) this.fx.emit({ pos: this.worldOf(this.lv.set(s.pos.x, 0.15, 0), this.wv), vel: this.up, velSpread: 0.05, life: 1.4, size: 0.04, grow: 0.15, color: '#b9b4ad', drag: 0.4 });
       }
       if (d > 1.6) {
         // se quemó: se saca solo con calidad 0
@@ -291,9 +302,9 @@ export class CookGame extends Minigame {
     if (this.kind === 'lobster') audio.setLoop('boil', 0.25);
     if (this.kind === 'smoke') {
       audio.setLoop('torch', anyCook ? 0.35 : 0);
-      this.ctx.kitchen.setFlame(anyCook ? 2 + Math.random() * 1.5 : 0, this.worldOf(new THREE.Vector3(0, 0.25, 0.1)));
+      this.ctx.kitchen.setFlame(anyCook ? 2 + Math.random() * 1.5 : 0, this.worldOf(this.lv.set(0, 0.25, 0.1), this.wv));
     }
-    if (this.kind === 'lobster' && Math.random() < 0.2) this.fx.steam(this.worldOf(new THREE.Vector3(rand(-0.15, 0.15), 0.24, 0)));
+    if (this.kind === 'lobster' && Math.random() < 0.2) this.fx.steam(this.worldOf(this.lv.set(rand(-0.15, 0.15), 0.24, 0), this.wv));
   }
 
   protected cleanup() {

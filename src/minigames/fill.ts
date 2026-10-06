@@ -25,6 +25,10 @@ export class FillGame extends Minigame {
   private height: number;
   private spoon = new THREE.Group();
   private srcPos: THREE.Vector3;
+  private ladlePos = new THREE.Vector3();
+  private lv = new THREE.Vector3(); // local temporal
+  private wv = new THREE.Vector3(); // mundo temporal
+  private sv = new THREE.Vector2();
 
   constructor(ctx: MGContext) {
     super(ctx);
@@ -145,7 +149,7 @@ export class FillGame extends Minigame {
   }
 
   protected update(dt: number) {
-    const ladlePos = new THREE.Vector3();
+    const ladlePos = this.ladlePos;
     if (this.holding && !this.busy) {
       this.holdT += dt;
       // el chorro acelera cuanto más mantienes: hay que anticipar
@@ -153,8 +157,8 @@ export class FillGame extends Minigame {
       this.level += rate * dt;
       audio.setLoop('stream', this.kind === 'caviar' ? 0.05 : 0.2);
       if (this.kind === 'caviar') {
-        if (Math.random() < 0.6) this.fx.emit({ pos: this.worldOf(new THREE.Vector3(0.04, this.height + 0.03, 0.02)), count: 1, spread: 0.015, vel: new THREE.Vector3(0, -0.3, 0), life: 0.15, size: 0.006, color: '#20271a' });
-      } else if (Math.random() < 0.5) this.fx.splash(this.worldOf(new THREE.Vector3(0.04, this.height * this.level + 0.02, 0.02)), '#c86a30', 1);
+        if (Math.random() < 0.6) this.fx.emit({ pos: this.worldOf(this.lv.set(0.04, this.height + 0.03, 0.02), this.wv), count: 1, spread: 0.015, vel: new THREE.Vector3(0, -0.3, 0), life: 0.15, size: 0.006, color: '#20271a' });
+      } else if (Math.random() < 0.5) this.fx.splash(this.worldOf(this.lv.set(0.04, this.height * this.level + 0.02, 0.02), this.wv), '#c86a30', 1);
       if (this.level > 1.0) {
         this.holding = false;
         this.level = 1.02;
@@ -164,7 +168,8 @@ export class FillGame extends Minigame {
       }
       ladlePos.set(0.04, this.height + 0.035, 0.02);
     } else {
-      ladlePos.copy(this.srcPos).add(new THREE.Vector3(0, this.kind === 'caviar' ? 0.08 : 0.22, 0));
+      ladlePos.copy(this.srcPos);
+      ladlePos.y += this.kind === 'caviar' ? 0.08 : 0.22;
       if (!this.holding) audio.setLoop('stream', 0);
     }
     this.spoon.position.lerp(ladlePos, Math.min(1, dt * 14));
@@ -174,7 +179,7 @@ export class FillGame extends Minigame {
     this.fillMesh.position.y = 0.003 + (this.height * lv) / 2;
     this.gauge.set(Math.min(1, this.level));
     // posicionar el gauge junto al recipiente
-    const sp = this.eng.toScreen(this.worldOf(new THREE.Vector3(0.12, this.height / 2, 0.02)));
+    const sp = this.eng.toScreen(this.worldOf(this.lv.set(0.12, this.height / 2, 0.02), this.wv), this.sv);
     this.gauge.el.style.transform = `translate(${sp.x}px, ${sp.y}px)`;
   }
 

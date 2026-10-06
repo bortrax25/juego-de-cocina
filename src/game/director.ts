@@ -61,12 +61,19 @@ export class Director {
   private familyQ: number[] = [];
   private familyPraised = false;
   private where: StationId | null = null;
+  private hint = '';
   private current: Minigame | null = null;
   private log: { at: number; text: string }[] = [];
   onEnd: (summary: string, stars: number) => void = () => {};
 
   constructor(private eng: Engine, private kitchen: Kitchen, private fx: FX, private ui: UI) {
     ui.onSelectTask = (uid) => this.select(uid);
+    // Tocar la escena también sirve: arranca la tarea más urgente (prioriza la estación actual)
+    eng.onDown(() => {
+      if (!this.running || this.paused || this.busy || this.current) return;
+      const t = this.nextTask();
+      if (t) this.select(t.uid);
+    });
     audio.setMuted(this.save.muted);
     eng.handheld = this.save.reduceMotion ? 0 : 1;
   }
@@ -131,7 +138,8 @@ export class Director {
   }
 
   private addTask(def: TaskDef, at: number, window: number, urgent: boolean) {
-    const t: TaskInst = { uid: ++this.uid, def, status: 'locked', unlockAt: at, deadline: at + window * (1 - (this.day - 1) * 0.04), urgent };
+    const w = urgent ? window : Math.max(35, window * (this.day === 1 ? 1.5 : 1 - (this.day - 1) * 0.04));
+    const t: TaskInst = { uid: ++this.uid, def, status: 'locked', unlockAt: at, deadline: at + w, urgent };
     this.tasks.push(t);
     return t;
   }
@@ -163,6 +171,8 @@ export class Director {
         changed = true;
         audio.play('ticket', 0.8);
         if (!t.urgent) this.ui.toast(`${t.def.icon} Nuevo ticket: ${t.def.title}`, 'info');
+        // el primer ticket del día (fichar) arranca solo para que nadie se quede mirando la pared
+        if (t.def.id === 'clockin' && !this.busy) queueMicrotask(() => this.select(t.uid));
       }
       if (t.status === 'open' && this.clock > t.deadline) {
         t.status = 'failed';
@@ -192,6 +202,15 @@ export class Director {
       this.listT = 0.5;
       this.renderList();
     }
+    // Indicación permanente de qué hacer cuando no hay minijuego en curso
+    if (!this.busy && !this.current) {
+      const nt = this.nextTask();
+      const hint = nt ? `▶ Toca la pantalla o un ticket para empezar: ${nt.def.title}` : '';
+      if (hint !== this.hint) {
+        this.hint = hint;
+        this.ui.setInstruction(hint);
+      }
+    } else this.hint = '';
     // Corte de edición: si no hay nada pendiente, saltamos al próximo ticket (como en el video)
     const open = this.tasks.some((t) => t.status === 'open' || t.status === 'active');
     if (!this.busy && !open) {
@@ -200,6 +219,14 @@ export class Director {
     } else this.idle = 0;
     // red de seguridad: el turno termina sí o sí
     if (this.clock > hm(20, 45) && !this.busy) this.endDay();
+  }
+
+  /** Tarea abierta más urgente; prioriza la estación donde ya estás. */
+  private nextTask() {
+    const open = this.tasks.filter((t) => t.status === 'open');
+    if (!open.length) return null;
+    open.sort((a, b) => Number(b.urgent) - Number(a.urgent) || a.deadline - b.deadline);
+    return (!open[0].urgent && open.find((t) => t.def.station === this.where)) || open[0];
   }
 
   private tooEarly() {
@@ -232,6 +259,8 @@ export class Director {
     const t = this.tasks.find((x) => x.uid === uid);
     if (!t || t.status !== 'open') return;
     this.busy = true;
+    this.hint = '';
+    this.ui.setInstruction('');
     t.status = 'active';
     this.renderList();
     audio.play('click');

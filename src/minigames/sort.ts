@@ -69,7 +69,10 @@ export class SortGame extends Minigame {
   private downAt: { x: number; y: number } | null = null;
   private keyH = (e: KeyboardEvent) => {
     const m: Record<string, Dir> = { ArrowLeft: 'left', ArrowUp: 'up', ArrowRight: 'right', a: 'left', w: 'up', d: 'right' };
-    if (m[e.key]) this.send(m[e.key]);
+    const d = m[e.key] ?? m[e.key.toLowerCase()];
+    if (!d) return;
+    e.preventDefault();
+    if (!e.repeat) this.send(d);
   };
 
   constructor(ctx: MGContext) {
@@ -120,6 +123,7 @@ export class SortGame extends Minigame {
     const dx = e.clientX - this.downAt.x, dy = e.clientY - this.downAt.y;
     this.downAt = null;
     if (Math.hypot(dx, dy) < 30) return;
+    if (dy > Math.abs(dx)) return; // deslizar hacia abajo no es un destino
     if (-dy > Math.abs(dx)) this.send('up');
     else this.send(dx < 0 ? 'left' : 'right');
   }

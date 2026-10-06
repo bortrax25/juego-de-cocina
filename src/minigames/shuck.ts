@@ -28,6 +28,7 @@ export class ShuckGame extends Minigame {
   private tray = hotelPan(0.3, 0.22, 0.04);
   private iceBed: THREE.Mesh;
   private opened: THREE.Object3D[] = [];
+  private tmpV = new THREE.Vector3();
 
   constructor(ctx: MGContext) {
     super(ctx);
@@ -55,7 +56,8 @@ export class ShuckGame extends Minigame {
     this.oy.group.rotation.y = rand(-0.2, 0.2);
     this.oy.group.scale.setScalar(1.35);
     this.group.add(this.oy.group);
-    tween(0.3, (k) => (this.oy.group.position.z = 0.3 - 0.28 * k), ease.outCubic);
+    const og = this.oy.group;
+    tween(0.3, (k) => (og.position.z = 0.3 - 0.28 * k), ease.outCubic);
     this.pressure = 0;
     this.progress = 0;
     this.slips = 0;
@@ -72,8 +74,13 @@ export class ShuckGame extends Minigame {
   }
 
   protected onMove() {
-    if (this.phase !== 'cut' || !this.swipeStart || !this.eng.pointerDown) return;
+    if (this.phase !== 'cut' || !this.eng.pointerDown) return;
     const p = this.pointerLocal(0.03);
+    // si el dedo ya estaba apoyado al abrirse la bisagra, el gesto empieza aquí
+    if (!this.swipeStart) {
+      this.swipeStart = p.clone();
+      return;
+    }
     const d = p.distanceTo(this.swipeStart);
     this.knife.position.set(p.x, 0.045, p.z);
     if (d > 0.07) this.open();
@@ -163,7 +170,7 @@ export class ShuckGame extends Minigame {
       const j = this.pressure * 0.004;
       this.knife.position.set(-0.11 + this.pressure * 0.03 + rand(-j, j), 0.035, 0.0 + rand(-j, j));
       this.knife.rotation.set(0, 0, -0.1 - this.pressure * 0.2);
-      const sp = this.eng.toScreen(this.worldOf(new THREE.Vector3(0, 0.0, 0.12)));
+      const sp = this.eng.toScreen(this.worldOf(this.tmpV.set(0, 0.0, 0.12)));
       this.gauge.el.style.transform = `translate(${sp.x}px, ${sp.y}px)`;
     }
   }

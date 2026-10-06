@@ -50,13 +50,17 @@ class Pool {
       this.ps.push({ alive: false, pos: new THREE.Vector3(), vel: new THREE.Vector3(), life: 0, max: 1, size: 0.02, grow: 0, gravity: 0, drag: 0, color: new THREE.Color() });
       this.mesh.setColorAt(i, this.c.set('#fff'));
     }
+    // Buffers que se reescriben cada frame
+    this.mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    if (this.mesh.instanceColor) this.mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
     this.mesh.renderOrder = additive ? 11 : 10;
   }
 
   emit(e: Emit) {
     const n = e.count ?? 1;
     for (let k = 0; k < n; k++) {
-      const p = this.ps.find((q) => !q.alive);
+      let p: P | undefined;
+      for (let i = 0; i < this.ps.length; i++) if (!this.ps[i].alive) { p = this.ps[i]; break; }
       if (!p) return;
       const sp = e.spread ?? 0;
       p.alive = true;

@@ -30,6 +30,9 @@ export class CoatGame extends Minigame {
   private holder = new THREE.Group();
   private soundT = 0;
   private itemStart = 0;
+  private tp = new THREE.Vector3();
+  private uvA = new THREE.Vector2();
+  private lastPct = -1;
 
   constructor(ctx: MGContext) {
     super(ctx);
@@ -68,6 +71,13 @@ export class CoatGame extends Minigame {
 
   private spawn() {
     this.holder.clear();
+    if (this.mesh) {
+      // liberar el lienzo anterior
+      this.mesh.geometry.dispose();
+      (this.mesh.material as THREE.Material).dispose();
+      this.paint.texture.dispose();
+    }
+    this.lastPct = -1;
     this.cells.fill(0);
     this.valid.fill(0);
     this.covered = 0;
@@ -187,7 +197,7 @@ export class CoatGame extends Minigame {
     const from = this.lastUV ?? uv;
     const dist = from.distanceTo(uv);
     const steps = Math.max(1, Math.ceil(dist / (this.brushUV * 0.35)));
-    for (let i = 1; i <= steps; i++) this.stamp(from.clone().lerp(uv, i / steps));
+    for (let i = 1; i <= steps; i++) this.stamp(this.uvA.copy(from).lerp(uv, i / steps));
     this.lastUV = uv;
     this.paint.texture.needsUpdate = true;
     this.soundT -= 1;
@@ -198,8 +208,12 @@ export class CoatGame extends Minigame {
     if (this.kind === 'flour' && Math.random() < 0.5) this.fx.flour(hit.point, 2);
     if (this.kind === 'cure' && Math.random() < 0.25) this.fx.splash(hit.point, '#8a6a2a', 1);
     const frac = this.covered / this.validCount;
-    this.ui.setProgress(this.idx + (frac >= 0.88 ? 1 : 0), this.count);
-    this.ui.setInstruction(`${this.instrBase()} ${Math.round(clamp(frac / 0.88) * 100)}%`);
+    const pct = Math.round(clamp(frac / 0.88) * 100);
+    if (pct !== this.lastPct) {
+      this.lastPct = pct;
+      this.ui.setProgress(this.idx + (frac >= 0.88 ? 1 : 0), this.count);
+      this.ui.setInstruction(`${this.instrBase()} ${pct}%`);
+    }
     if (frac >= 0.88) this.itemDone();
   }
 
@@ -274,7 +288,7 @@ export class CoatGame extends Minigame {
 
   protected update(dt: number) {
     if (this.tool) {
-      const p = this.pointerLocal(0.004);
+      const p = this.pointerLocal(0.004, this.tp);
       this.tool.position.x += (p.x - this.tool.position.x) * Math.min(1, dt * 20);
       this.tool.position.z += (p.z - this.tool.position.z) * Math.min(1, dt * 20);
       this.tool.position.y = this.eng.pointerDown ? 0.004 : 0.02;
