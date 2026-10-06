@@ -46,6 +46,8 @@ export class SliceGame extends Minigame {
   private pan = hotelPan(0.3, 0.2, 0.06);
   private cutPieces: THREE.Object3D[] = [];
   private kx = 0;
+  private pv = new THREE.Vector3(); // puntero local (reutilizado)
+  private tgt = new THREE.Vector3();
 
   constructor(ctx: MGContext) {
     super(ctx);
@@ -137,7 +139,7 @@ export class SliceGame extends Minigame {
 
   protected update(dt: number) {
     // El cuchillo sigue al puntero en x; en touch se posiciona al tocar
-    const p = this.pointerLocal(0);
+    const p = this.pointerLocal(0, this.pv);
     const target = Math.max(-0.22, Math.min(0.25, p.x));
     this.kx += (target - this.kx) * Math.min(1, dt * 30);
     if (!this.chopping) this.knife.position.set(this.kx, this.hy(this.kx) + 0.075, 0.1);
@@ -152,8 +154,8 @@ export class SliceGame extends Minigame {
   }
 
   protected onDown() {
-    if (this.busy) return;
-    const p = this.pointerLocal(0);
+    if (this.busy || this.chopping) return; // evita cortes superpuestos
+    const p = this.pointerLocal(0, this.pv);
     this.kx = Math.max(-0.22, Math.min(0.25, p.x));
     this.chop(this.kx);
   }
@@ -173,7 +175,7 @@ export class SliceGame extends Minigame {
     if (gx === undefined) return;
     const dx = x - gx;
     const handX = this.hand.position.x;
-    if (x < handX + 0.03 && x > handX - 0.06) {
+    if (x < handX + 0.022 && x > handX - 0.06) {
       // ¡Corte en el dedo!
       this.injured = true;
       this.scores.push(0);
@@ -198,9 +200,9 @@ export class SliceGame extends Minigame {
     const piece = this.segs[this.next];
     if (piece) {
       const tx = piece.position.x + 0.012 + Math.max(0, this.next) * 0.003;
-      const r0 = piece.rotation.z;
+      const r0 = piece.rotation.z, px0 = piece.position.x;
       tween(0.18, (k) => {
-        piece.position.x = piece.position.x + (tx - piece.position.x) * k;
+        piece.position.x = px0 + (tx - px0) * k;
         piece.rotation.z = r0 - 0.15 * k;
       });
       this.cutPieces.push(piece);
@@ -222,7 +224,7 @@ export class SliceGame extends Minigame {
     const dest = this.pan.position.clone().add(new THREE.Vector3(0, 0.02, 0));
     await tween(0.4, (k) => {
       all.forEach((m, i) => {
-        const tgt = dest.clone();
+        const tgt = this.tgt.copy(dest);
         tgt.x += (i - all.length / 2) * 0.02;
         m.position.lerpVectors(starts[i], tgt, k);
         m.position.y = starts[i].y + Math.sin(k * Math.PI) * 0.06;

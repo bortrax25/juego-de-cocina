@@ -28,6 +28,8 @@ export class PickGame extends Minigame {
   private rounds: number;
   private round = 0;
   private busy = false;
+  private tp = new THREE.Vector3();
+  private tpl = new THREE.Vector3();
 
   constructor(ctx: MGContext) {
     super(ctx);
@@ -106,8 +108,8 @@ export class PickGame extends Minigame {
   }
 
   protected update(dt: number) {
-    const p = this.pointerLocal(0.03);
-    this.tool.position.lerp(new THREE.Vector3(p.x + 0.004, 0.03, p.z), Math.min(1, dt * 25));
+    const p = this.pointerLocal(0.03, this.tp);
+    this.tool.position.lerp(this.tpl.set(p.x + 0.004, 0.03, p.z), Math.min(1, dt * 25));
     if (this.kind === 'clams') this.tool.visible = false;
   }
 
@@ -149,7 +151,10 @@ export class PickGame extends Minigame {
     const mark = new THREE.Mesh(new THREE.CircleGeometry(0.006, 8), new THREE.MeshBasicMaterial({ color: '#a8352a', transparent: true, opacity: 0.6 }));
     mark.rotation.x = -Math.PI / 2;
     mark.position.set(p.x, this.kind === 'pinbone' ? 0.031 : 0.025, p.z);
-    if (this.kind !== 'clams') this.group.add(mark);
+    if (this.kind !== 'clams') {
+      this.group.add(mark);
+      this.base.push(mark); // se limpia al cambiar de ronda
+    }
     this.eng.shake(0.2);
   }
 
