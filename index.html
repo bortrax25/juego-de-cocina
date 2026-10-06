@@ -1,51 +1,18 @@
 <!doctype html>
 <html lang="es">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Juego de Cocina</title>
-  <link rel="stylesheet" href="src/estilos.css">
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+  <meta name="theme-color" content="#0e1116" />
+  <meta name="description" content="Un día en la vida de un cocinero en un restaurante con estrella Michelin en Nueva York." />
+  <title>Mise en Place NYC</title>
+  <link rel="icon" href="icon.svg" type="image/svg+xml" />
+  <link rel="manifest" href="manifest.webmanifest" />
 </head>
 <body>
-  <header class="barra">
-    <h1>🍳 Juego de Cocina</h1>
-    <div class="marcador">
-      <span>Puntos: <strong id="puntos">0</strong></span>
-      <span>Vidas: <strong id="vidas">❤️❤️❤️</strong></span>
-    </div>
-  </header>
-
-  <main>
-    <section>
-      <h2>Pedidos</h2>
-      <div id="pedidos" class="pedidos"></div>
-    </section>
-
-    <section>
-      <h2>Tu plato</h2>
-      <div id="plato" class="plato"><span class="vacio">Vacío</span></div>
-      <div class="acciones">
-        <button id="btn-servir" class="principal">Servir</button>
-        <button id="btn-vaciar">Vaciar plato</button>
-      </div>
-      <p id="mensaje" class="mensaje" aria-live="polite"></p>
-    </section>
-
-    <section>
-      <h2>Ingredientes</h2>
-      <div id="ingredientes" class="ingredientes"></div>
-    </section>
-  </main>
-
-  <div id="fin" class="fin oculto">
-    <div class="tarjeta">
-      <h2>¡Se acabó el turno!</h2>
-      <p>Puntaje final: <strong id="puntaje-final">0</strong></p>
-      <button id="btn-reiniciar" class="principal">Jugar de nuevo</button>
-    </div>
-  </div>
-
-  <script src="src/recetas.js"></script>
-  <script src="src/juego.js"></script>
+  <canvas id="gl"></canvas>
+  <div id="ui"></div>
+  <div id="boot">PREPARANDO LA COCINA…</div>
+  <script type="module" src="/src/main.ts"></script>
 </body>
 </html>
