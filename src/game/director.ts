@@ -18,6 +18,9 @@ import { ShuckGame } from '../minigames/shuck';
 import { SwipeGame } from '../minigames/swipe';
 import { SequenceGame } from '../minigames/sequence';
 import { load, save, type SaveData } from './save';
+import type { Player } from '../world/player';
+import { standPoint } from '../world/player';
+import type { Input } from '../core/input';
 
 type Status = 'locked' | 'open' | 'active' | 'done' | 'failed';
 
@@ -62,20 +65,92 @@ export class Director {
   private familyPraised = false;
   private where: StationId | null = null;
   private hint = '';
+  private player: Player | null = null;
+  private input: Input | null = null;
+  private near: TaskInst | null = null;
+  private walkingTo = 0;
+  private marker = new THREE.Group();
+  private guide = new THREE.Group();
   private current: Minigame | null = null;
   private log: { at: number; text: string }[] = [];
   onEnd: (summary: string, stars: number) => void = () => {};
 
   constructor(private eng: Engine, private kitchen: Kitchen, private fx: FX, private ui: UI) {
     ui.onSelectTask = (uid) => this.select(uid);
-    // Tocar la escena también sirve: arranca la tarea más urgente (prioriza la estación actual)
-    eng.onDown(() => {
-      if (!this.running || this.paused || this.busy || this.current) return;
-      const t = this.nextTask();
-      if (t) this.select(t.uid);
-    });
     audio.setMuted(this.save.muted);
     eng.handheld = this.save.reduceMotion ? 0 : 1;
+  }
+
+  /** Conecta al jugador en tercera persona: caminar hasta la estación e interactuar. */
+  attach(player: Player, input: Input) {
+    this.player = player;
+    this.input = input;
+    input.onInteract(() => {
+      if (this.near) this.select(this.near.uid);
+    });
+    input.onTapGround((pt) => {
+      if (!this.running || this.busy || this.paused) return;
+      this.walkingTo = 0;
+      player.walkTo(pt.x, pt.z);
+    });
+    // Marcador del próximo ticket: aro en el piso + rombo flotante (estilo juego .io)
+    const ringMat = new THREE.MeshBasicMaterial({ color: '#ffc94a', transparent: true, opacity: 0.85, depthWrite: false });
+    const ring = new THREE.Mesh(new THREE.RingGeometry(0.34, 0.42, 40), ringMat);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.y = 0.012;
+    const disc = new THREE.Mesh(new THREE.CircleGeometry(0.34, 40), new THREE.MeshBasicMaterial({ color: '#ffc94a', transparent: true, opacity: 0.16, depthWrite: false }));
+    disc.rotation.x = -Math.PI / 2;
+    disc.position.y = 0.011;
+    const gem = new THREE.Mesh(new THREE.OctahedronGeometry(0.11), new THREE.MeshStandardMaterial({ color: '#ffc94a', emissive: '#ff9d00', emissiveIntensity: 1.4, roughness: 0.3 }));
+    gem.scale.y = 1.5;
+    gem.position.y = 2.15;
+    this.marker.add(ring, disc, gem);
+    this.marker.visible = false;
+    this.eng.scene.add(this.marker);
+    // Flecha guía alrededor de los pies del jugador
+    const arrow = new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.22, 3), new THREE.MeshBasicMaterial({ color: '#ffc94a', transparent: true, opacity: 0.9, depthWrite: false }));
+    arrow.rotation.x = -Math.PI / 2;
+    arrow.position.set(0, 0.02, -0.62);
+    this.guide.add(arrow);
+    this.guide.visible = false;
+    this.eng.scene.add(this.guide);
+    this.eng.addUpdate((dt, time) => this.updateGuides(dt, time));
+  }
+
+  private updateGuides(_dt: number, time: number) {
+    const p = this.player;
+    const nt = this.running && !this.busy && !this.paused ? this.nextTask() : null;
+    this.marker.visible = !!nt;
+    this.guide.visible = false;
+    if (!nt || !p) return;
+    const sp = standPoint(STATIONS[nt.def.station]);
+    this.marker.position.set(sp.x, 0, sp.z);
+    const k = 1 + Math.sin(time * 4) * 0.06;
+    this.marker.children[0].scale.setScalar(k);
+    const gem = this.marker.children[2];
+    gem.rotation.y = time * 1.6;
+    gem.position.y = 2.1 + Math.sin(time * 2.4) * 0.08;
+    const pp = p.position;
+    const dx = sp.x - pp.x, dz = sp.z - pp.z;
+    if (Math.hypot(dx, dz) > 1.6) {
+      this.guide.visible = true;
+      this.guide.position.set(pp.x, 0, pp.z);
+      this.guide.rotation.y = Math.atan2(-dx, -dz);
+    }
+  }
+
+  /** Ticket abierto cuyo punto de trabajo está al alcance del jugador. */
+  private nearTask(): TaskInst | null {
+    const p = this.player;
+    if (!p) return null;
+    let best: TaskInst | null = null, bd = 1.05;
+    for (const t of this.tasks) {
+      if (t.status !== 'open') continue;
+      const sp = standPoint(STATIONS[t.def.station]);
+      const d = Math.hypot(sp.x - p.position.x, sp.z - p.position.z);
+      if (d < bd || (best && d === bd && t.urgent)) { bd = d; best = t; }
+    }
+    return best;
   }
 
   persist() {
@@ -130,8 +205,15 @@ export class Director {
     this.running = true;
     this.paused = false;
     this.busy = true;
-    // Escena de llegada: la calle (6:40 am) -> vestidor
-    this.eng.setView(this.view('entrada'));
+    // Escena de llegada: el jugador entra por la puerta del vestidor y la cámara lo sigue
+    if (this.player) {
+      const sp = standPoint(STATIONS.entrada);
+      this.player.teleport(sp.x, sp.z - 0.5, sp.ry);
+      this.player.enabled = true;
+      if (this.input) this.input.enabled = true;
+      this.eng.setFollow(this.player.root);
+      this.eng.releaseView(1.4);
+    } else this.eng.setView(this.view('entrada'));
     this.ui.showCaption('6:40 am', day === LAST_DAY ? 'último día en un restaurante con estrella michelin' : 'llegando al restaurante · nueva york', 3);
     wait(1.2).then(() => (this.busy = false));
     this.renderList();
@@ -205,12 +287,19 @@ export class Director {
     // Indicación permanente de qué hacer cuando no hay minijuego en curso
     if (!this.busy && !this.current) {
       const nt = this.nextTask();
-      const hint = nt ? `▶ Toca la pantalla o un ticket para empezar: ${nt.def.title}` : '';
+      this.near = this.nearTask();
+      this.ui.setPrompt(this.near ? `${this.near.def.icon} ${this.near.def.title}` : null, () => this.near && this.select(this.near.uid));
+      const touch = matchMedia('(pointer: coarse)').matches;
+      const hint = this.walkingTo ? '' : this.near ? '' : nt ? `▶ Ve a ${STATIONS[nt.def.station].name} (${touch ? 'joystick o toca el ticket' : 'WASD / clic en el piso o en el ticket'}) · ${nt.def.title}` : '';
       if (hint !== this.hint) {
         this.hint = hint;
         this.ui.setInstruction(hint);
       }
-    } else this.hint = '';
+    } else {
+      this.hint = '';
+      this.near = null;
+      this.ui.setPrompt(null);
+    }
     // Corte de edición: si no hay nada pendiente, saltamos al próximo ticket (como en el video)
     const open = this.tasks.some((t) => t.status === 'open' || t.status === 'active');
     if (!this.busy && !open) {
@@ -258,6 +347,23 @@ export class Director {
     if (this.busy || this.paused || !this.running) return;
     const t = this.tasks.find((x) => x.uid === uid);
     if (!t || t.status !== 'open') return;
+    // En tercera persona primero caminamos hasta la estación (se cancela si el jugador se mueve)
+    const p = this.player;
+    if (p) {
+      const sp = standPoint(STATIONS[t.def.station]);
+      if (Math.hypot(sp.x - p.position.x, sp.z - p.position.z) > 0.35) {
+        if (this.walkingTo === uid) return;
+        this.walkingTo = uid;
+        this.ui.setInstruction(`Caminando a ${STATIONS[t.def.station].name}…`);
+        const ok = await p.walkTo(sp.x, sp.z, sp.ry);
+        if (this.walkingTo === uid) this.walkingTo = 0;
+        this.hint = '';
+        if (!ok || this.busy || t.status !== 'open' || !this.running) return;
+      }
+      p.faceTo(STATIONS[t.def.station].work.x, STATIONS[t.def.station].work.z);
+      p.enabled = false;
+      if (this.input) this.input.enabled = false;
+    }
     this.busy = true;
     this.hint = '';
     this.ui.setInstruction('');
@@ -265,7 +371,8 @@ export class Director {
     this.renderList();
     audio.play('click');
     const wide = t.def.params.kind === 'goodbye';
-    if (this.where !== t.def.station || wide) await this.eng.moveTo(this.view(t.def.station, wide), 0.9);
+    if (p) await this.eng.lockView(this.view(t.def.station, wide), 0.85);
+    else if (this.where !== t.def.station || wide) await this.eng.moveTo(this.view(t.def.station, wide), 0.9);
     this.where = wide ? null : t.def.station;
     this.ui.showCaption(fmtTime(this.clock), t.def.caption);
     this.ui.setInTask(true);
@@ -309,6 +416,11 @@ export class Director {
     await wait(0.4);
     mg.dispose();
     this.renderList();
+    if (p && t.def.id !== 'clockout') {
+      await this.eng.releaseView(0.8);
+      p.enabled = true;
+      if (this.input) this.input.enabled = true;
+    }
     this.busy = false;
     if (t.def.id === 'clockout') this.endDay();
   }
@@ -336,6 +448,9 @@ export class Director {
     if (!this.running) return;
     this.running = false;
     this.ui.showHud(false);
+    this.ui.setPrompt(null);
+    if (this.player) this.player.enabled = false;
+    if (this.input) this.input.enabled = false;
     const done = this.tasks.filter((t) => t.status === 'done');
     const failed = this.tasks.filter((t) => t.status === 'failed' || t.status === 'open' || t.status === 'locked');
     const avg = done.length ? done.reduce((a, t) => a + (t.quality ?? 0), 0) / done.length : 0;
@@ -376,13 +491,13 @@ export class Director {
     const spots = [-1.0, -0.5, 0, 0.5, 1.0];
     await Promise.all(crew.map((c, i) => c.walkTo(spots[i] ?? 0, -1.2, 0, 2.2)));
     crew.forEach((c) => (c.work = 'idle'));
-    await this.eng.moveTo({ pos: new THREE.Vector3(0, 1.5, 1.6), look: new THREE.Vector3(0, 1.2, -1.2), fov: 60 }, 1.2);
+    await this.eng.lockView({ pos: new THREE.Vector3(0, 1.5, 1.6), look: new THREE.Vector3(0, 1.2, -1.2), fov: 60 }, 1.2);
     await wait(0.6);
     audio.play('click', 2);
     this.ui.flash();
   }
 
   toOverview() {
-    return this.eng.moveTo(OVERVIEW, 1.2);
+    return this.eng.lockView(OVERVIEW, 1.2);
   }
 }

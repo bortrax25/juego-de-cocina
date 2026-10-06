@@ -1,14 +1,17 @@
 import * as THREE from 'three/webgpu';
 import { Minigame, type MGContext } from './base';
-import { langoustine, lobster, hotelPan } from '../world/props';
+import { langoustine, lobster, hotelPan, knife } from '../world/props';
 import { tween, ease, clamp, rand } from '../core/tween';
 import { audio } from '../core/audio';
 
 type Kind = 'langoustine' | 'lobstertail';
 
+const TRAIL = 18;
+
 /**
  * Deslizar para separar: cabezas de langostino (van al fondo) y colas de langosta.
  * El trazo debe cruzar la línea punteada lo más cerca posible del punto marcado.
+ * El cuchillo deja estela; un corte perfecto congela el instante (hit-stop) y separa en cámara lenta.
  */
 export class SwipeGame extends Minigame {
   private kind: Kind;
@@ -18,6 +21,11 @@ export class SwipeGame extends Minigame {
   private line: THREE.Mesh;
   private dot: THREE.Mesh;
   private trail: THREE.Mesh;
+  private trailPos: Float32Array;
+  private pts: number[] = []; // x,z de la estela (más viejo primero)
+  private trailFade = 0;
+  private blade = new THREE.Group(); // pivote en la punta: la hoja va detrás del dedo, sobre la estela
+  private bladeYaw = 0;
   private start0: THREE.Vector3 | null = null;
   private last = new THREE.Vector3();
   private busy = true;
@@ -39,17 +47,32 @@ export class SwipeGame extends Minigame {
     this.dot = new THREE.Mesh(new THREE.RingGeometry(0.008, 0.012, 20), new THREE.MeshBasicMaterial({ color: '#7dff9a', depthTest: false, transparent: true }));
     this.dot.rotation.x = -Math.PI / 2;
     this.dot.renderOrder = 6;
-    this.trail = new THREE.Mesh(new THREE.PlaneGeometry(1, 0.004), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, depthTest: false }));
-    this.trail.rotation.x = -Math.PI / 2;
+    // estela: cinta de TRAIL puntos que se afina hacia la cola (buffers fijos, sin GC)
+    this.trailPos = new Float32Array(TRAIL * 2 * 3);
+    const tg = new THREE.BufferGeometry();
+    tg.setAttribute('position', new THREE.BufferAttribute(this.trailPos, 3).setUsage(THREE.DynamicDrawUsage));
+    const idx: number[] = [];
+    for (let i = 0; i < TRAIL - 1; i++) {
+      const a = i * 2, b = a + 1, c = a + 2, d = a + 3;
+      idx.push(a, b, c, b, d, c);
+    }
+    tg.setIndex(idx);
+    this.trail = new THREE.Mesh(tg, new THREE.MeshBasicMaterial({ color: '#eaf6ff', transparent: true, opacity: 0, depthTest: false, side: THREE.DoubleSide }));
+    this.trail.frustumCulled = false;
     this.trail.renderOrder = 7;
     this.group.add(this.line, this.dot, this.trail);
+    const kn = knife();
+    kn.position.x = -0.245;
+    this.blade.add(kn);
+    this.blade.scale.setScalar(0.75);
+    this.group.add(this.blade);
     this.headPan.position.set(-0.2, 0, -0.24);
     this.tailPan.position.set(0.2, 0, -0.24);
     this.group.add(this.headPan, this.tailPan);
   }
 
   protected start() {
-    this.ui.setInstruction(this.kind === 'langoustine' ? 'Desliza a lo largo de la línea para separar la cabeza del langostino.' : 'Desliza a lo largo de la línea para separar la cola de la langosta.');
+    this.ui.setInstruction(this.kind === 'langoustine' ? 'Pasa el cuchillo (desliza) a través de la línea, justo por el punto verde, para separar la cabeza.' : 'Pasa el cuchillo (desliza) a través de la línea, justo por el punto verde, para separar la cola.');
     this.spawn();
   }
 
@@ -90,9 +113,43 @@ export class SwipeGame extends Minigame {
   }
 
   protected onDown() {
+    this.pts.length = 0;
     if (this.busy) return;
     this.start0 = this.pointerLocal(0.03);
     this.last.copy(this.start0);
+    this.pushPt(this.start0);
+  }
+
+  private pushPt(p: THREE.Vector3) {
+    this.pts.push(p.x, p.z);
+    if (this.pts.length > TRAIL * 2) this.pts.splice(0, 2);
+    this.trailFade = 1;
+  }
+
+  /** Reconstruye la cinta de la estela: ancho máximo en la punta, cero en la cola. */
+  private buildTrail() {
+    const n = this.pts.length / 2;
+    const P = this.trailPos;
+    const W = 0.006;
+    for (let i = 0; i < TRAIL; i++) {
+      const j = Math.min(i, n - 1);
+      if (n < 2) {
+        P.fill(0);
+        break;
+      }
+      const x = this.pts[j * 2], z = this.pts[j * 2 + 1];
+      const j0 = Math.max(0, j - 1), j1 = Math.min(n - 1, j + 1);
+      let dx = this.pts[j1 * 2] - this.pts[j0 * 2], dz = this.pts[j1 * 2 + 1] - this.pts[j0 * 2 + 1];
+      const l = Math.hypot(dx, dz) || 1;
+      dx /= l;
+      dz /= l;
+      const w = (W * j) / (n - 1);
+      const o = i * 6;
+      P[o] = x - dz * w; P[o + 1] = 0.062; P[o + 2] = z + dx * w;
+      P[o + 3] = x + dz * w; P[o + 4] = 0.062; P[o + 5] = z - dx * w;
+    }
+    const attr = this.trail.geometry.getAttribute('position') as THREE.BufferAttribute;
+    attr.needsUpdate = true;
   }
 
   protected onMove() {
@@ -102,8 +159,11 @@ export class SwipeGame extends Minigame {
       // el dedo ya estaba apoyado cuando apareció la pieza (o tras el corte anterior)
       this.start0 = p.clone();
       this.last.copy(p);
+      this.pts.length = 0;
+      this.pushPt(p);
       return;
     }
+    this.pushPt(p);
     // ¿el trazo last->p atravesó el cuerpo (eje z = neck.z)? medimos dónde lo cruzó en x
     const a = this.last.z - this.neck.z, b = p.z - this.neck.z;
     if (a * b <= 0 && Math.abs(p.z - this.last.z) > 1e-5) {
@@ -111,14 +171,10 @@ export class SwipeGame extends Minigame {
       const x = this.last.x + (p.x - this.last.x) * t;
       if (Math.abs(x - this.neck.x) < 0.06) this.cut(x);
     }
+    if (Math.abs(p.x - this.last.x) + Math.abs(p.z - this.last.z) > 0.002) this.bladeYaw = Math.atan2(-(p.z - this.last.z), p.x - this.last.x);
     this.last.copy(p);
-    // estela del cuchillo
-    const mid = this.tmpMid.copy(this.start0).lerp(p, 0.5);
-    const len = this.start0.distanceTo(p);
-    this.trail.position.set(mid.x, 0.06, mid.z);
-    this.trail.scale.x = len;
-    this.trail.rotation.z = Math.atan2(-(p.z - this.start0.z), p.x - this.start0.x);
-    (this.trail.material as THREE.MeshBasicMaterial).opacity = 0.6;
+    if (this.busy) return;
+    if (Math.random() < 0.3) audio.play('whoosh', 0.15);
   }
 
   protected onUp() {
@@ -130,15 +186,26 @@ export class SwipeGame extends Minigame {
     this.start0 = null;
     const off = Math.abs(x - this.neck.x);
     const q = clamp(1 - off / 0.045, 0.1, 1);
+    const perfect = q >= 0.92;
     this.score(q, new THREE.Vector3(this.neck.x, 0.06, this.neck.z));
     audio.play(this.kind === 'langoustine' ? 'pluck' : 'chop');
     audio.play('scrape', 0.6);
-    this.eng.shake(0.2);
     this.line.visible = this.dot.visible = false;
-    this.fx.splash(this.worldOf(this.neck), '#f0805a', 5);
+    this.fx.splash(this.worldOf(this.neck), '#f0805a', perfect ? 10 : 5);
+    if (perfect) {
+      // hit-stop: el instante del corte se congela, luego separa en cámara lenta
+      this.eng.shake(0.45);
+      this.haptic(25);
+      this.fx.sparkle(this.worldOf(this.neck), '#ffffff', 14);
+      this.trailFade = 1.4;
+      await this.hitStop(0.14);
+    } else {
+      this.eng.shake(0.2);
+      this.haptic(10);
+    }
     const c = this.cur!;
     const h0 = c.head.position.clone(), t0 = c.tail.position.clone();
-    await tween(0.18, (k) => {
+    await tween(perfect ? 0.45 : 0.18, (k) => {
       c.head.position.x = h0.x - 0.025 * k;
       c.head.rotation.z = 0.25 * k;
       c.tail.position.x = t0.x + 0.025 * k;
@@ -163,7 +230,6 @@ export class SwipeGame extends Minigame {
     c.head.scale.multiplyScalar(0.7);
     c.tail.scale.multiplyScalar(0.7);
     this.group.remove(c.group);
-    (this.trail.material as THREE.MeshBasicMaterial).opacity = 0;
     this.idx++;
     this.ui.setProgress(this.idx, this.count);
     if (this.idx >= this.count) this.finish();
@@ -172,7 +238,21 @@ export class SwipeGame extends Minigame {
 
   protected update(dt: number) {
     const m = this.trail.material as THREE.MeshBasicMaterial;
-    if (!this.start0) m.opacity = Math.max(0, m.opacity - dt * 3);
+    // la estela se consume desde la cola cuando el cuchillo se detiene
+    this.trailFade = Math.max(0, this.trailFade - dt * 2.5);
+    if (!this.eng.pointerDown && this.pts.length > 0 && this.trailFade < 0.6) this.pts.splice(0, 2);
+    m.opacity = Math.min(0.75, this.trailFade);
+    this.buildTrail();
+    // cuchillo: sigue al puntero, alineado con el movimiento
+    const p = this.pointerLocal(0.06, this.tmpMid);
+    const down = this.eng.pointerDown;
+    this.blade.position.x += (p.x - this.blade.position.x) * Math.min(1, dt * 30);
+    this.blade.position.z += (p.z - this.blade.position.z) * Math.min(1, dt * 30);
+    this.blade.position.y += ((down ? 0.035 : 0.08) - this.blade.position.y) * Math.min(1, dt * 16);
+    let dy = this.bladeYaw - this.blade.rotation.y;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    this.blade.rotation.y += dy * Math.min(1, dt * 14);
+    this.blade.rotation.x = down ? -0.2 : -0.6;
     const s = 1 + Math.sin(this.elapsed * 8) * 0.15;
     this.dot.scale.setScalar(s);
   }

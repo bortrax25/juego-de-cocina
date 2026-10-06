@@ -135,7 +135,7 @@ button { font: inherit; color: inherit; cursor: pointer; border: 0; background: 
 .ring[data-s=ready] { animation: ringP 0.5s ease-in-out infinite alternate; }
 .ring[data-s=burn] .fg { stroke: var(--bad); }
 .ring[data-s=idle] span { font-size: 24px; font-weight: 400; }
-@keyframes ringP { to { transform: var(--t, none) scale(1.08); } }
+@keyframes ringP { to { scale: 1.1; } }
 
 .tag { position: absolute; left: 0; top: 0; padding: 3px 8px; margin: -12px 0 0 0; border-radius: 999px; background: var(--glass); font-size: 12px; font-family: var(--cond); letter-spacing: 0.05em; white-space: nowrap; translate: -50% 0; }
 .tag.hint { width: 22px; height: 22px; padding: 0; display: grid; place-items: center; background: rgba(242,201,76,0.95); color: #1a1a1a; font-size: 10px; animation: hint 0.9s ease-in-out infinite alternate; }

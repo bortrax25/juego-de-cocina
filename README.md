@@ -18,19 +18,24 @@ npm run build
 npm run preview
 ```
 
-### Controles
+### Controles (v2)
 
-| Acción | Cómo |
-|---|---|
-| Elegir tarea | Toca un ticket de la **lista de prep** |
-| Cortar | Toca o haz clic sobre la línea guía |
-| Servir o hacer palanca | Mantén presionado y suelta |
-| Cubrir o limpiar | Arrastra |
-| Separar | Desliza a lo largo de la línea |
-| Clasificar | Desliza, usa ← ↑ → o toca el destino |
-| Pausa | `Esc` o el botón ❚❚ |
+| Acción | Escritorio | Celular |
+|---|---|---|
+| Caminar | WASD / flechas (Shift corre) o clic en el piso | Joystick (pulgar a la izquierda) o tocar el piso |
+| Ir a una tarea | Clic en el ticket de la **lista de prep** (camina solo) | Tocar el ticket |
+| Empezar la tarea | `E` / Espacio junto a la estación, o el botón | Tocar el botón |
+| Zoom de cámara | Rueda del mouse | Pellizcar |
+| Cortar | Arrastrar el cuchillo hacia abajo (combo con ritmo) | igual |
+| Servir | Presionar y arrastrar hacia abajo: más inclinación, más chorro | igual |
+| Freír / hervir | Arrastrar la canasta al aceite, agitar, arrastrar arriba para sacar | igual |
+| Pinzas | Agarrar y tirar | igual |
+| Cubrir / limpiar | Arrastrar (lento = trazo más ancho) | igual |
+| Clasificar | Agarrar y lanzar hacia el destino (o ← ↑ →) | igual |
+| Ostras | Mover el cuchillo de lado a lado en la franja, luego deslizar | igual |
+| Pausa | `Esc` o ❚❚ | ❚❚ |
 
-Parámetros de URL: `?webgl` fuerza WebGL2 (por defecto se usa WebGPU si está disponible).
+Parámetros de URL: `?webgl` fuerza WebGL2 (por defecto se usa WebGPU si está disponible); `?hq` / `?lq` fuerzan calidad alta o baja (sombras, bloom).
 
 ## Tecnología
 

@@ -6,19 +6,25 @@ import { audio } from '../core/audio';
 import type { Gauge } from '../ui/ui';
 
 /**
- * Abrir ostras: 1) mantén la presión dentro de la franja para entrar por la bisagra,
- * 2) desliza para cortar el músculo y abrirla. Demasiada fuerza = el cuchillo resbala.
+ * Abrir ostras: 1) presiona el cuchillo en la bisagra y menéalo de lado a lado (arrastres
+ * alternados) para hacer palanca; con fuerza dentro de la franja avanza, demasiado rápido = el
+ * cuchillo resbala. 2) desliza para cortar el músculo y abrirla.
  */
 export class ShuckGame extends Minigame {
   private count: number;
   private idx = 0;
   private phase: 'pry' | 'cut' | 'busy' = 'busy';
-  private pressure = 0;
+  private force = 0; // intensidad del meneo 0..1
   private progress = 0;
-  private zoneC = 0.55;
-  private zoneW = 0.22;
-  private zoneT = 0;
+  private zoneA = 0.25;
+  private zoneB = 0.82;
   private slips = 0;
+  private pressing = false;
+  private lastX = 0;
+  private wDir = 0;
+  private wTravel = 0;
+  private wiggle = 0; // giro visual del cuchillo
+  private slipCool = 0;
   private inZone = 0;
   private total = 0;
   private oy!: ReturnType<typeof oyster>;
@@ -58,22 +64,34 @@ export class ShuckGame extends Minigame {
     this.group.add(this.oy.group);
     const og = this.oy.group;
     tween(0.3, (k) => (og.position.z = 0.3 - 0.28 * k), ease.outCubic);
-    this.pressure = 0;
+    this.force = 0;
     this.progress = 0;
     this.slips = 0;
     this.inZone = this.total = 0;
-    this.zoneW = this.ctx.day >= 3 ? 0.18 : 0.24;
+    this.zoneB = this.ctx.day >= 3 ? 0.74 : 0.82;
     this.phase = 'pry';
     this.gauge.el.style.display = '';
-    this.ui.setInstruction('Mantén presionado para hacer palanca en la bisagra. ¡Mantente en la franja!');
+    this.ui.setInstruction('Presiona en la bisagra y menea el cuchillo de lado a lado (arrastra ↔). Firme pero sin pasarte de la franja.');
     this.ui.setProgress(this.idx, this.count);
   }
 
   protected onDown() {
     if (this.phase === 'cut') this.swipeStart = this.pointerLocal(0.03);
+    if (this.phase === 'pry') {
+      this.pressing = true;
+      this.lastX = this.eng.pointerPx.x;
+      this.wDir = 0;
+      this.wTravel = 0;
+      audio.play('scrape', 0.4);
+      this.haptic(8);
+    }
   }
 
   protected onMove() {
+    if (this.phase === 'pry' && this.pressing) {
+      this.pryMove();
+      return;
+    }
     if (this.phase !== 'cut' || !this.eng.pointerDown) return;
     const p = this.pointerLocal(0.03);
     // si el dedo ya estaba apoyado al abrirse la bisagra, el gesto empieza aquí
@@ -88,12 +106,52 @@ export class ShuckGame extends Minigame {
 
   protected onUp() {
     this.swipeStart = null;
+    this.pressing = false;
+  }
+
+  /** Meneo: cada cambio de sentido con recorrido suficiente es un "pry". */
+  private pryMove() {
+    const x = this.eng.pointerPx.x;
+    const dx = x - this.lastX;
+    this.lastX = x;
+    // la fuerza sigue a la velocidad horizontal del meneo
+    const f = clamp(Math.abs(this.pVel.x) / (this.unitPx * 130));
+    if (f > this.force) this.force += (f - this.force) * 0.6;
+    this.wiggle = clamp(this.wiggle + dx / (this.unitPx * 30), -0.3, 0.3);
+    const dir = Math.sign(dx);
+    if (dir === 0) return;
+    if (dir === this.wDir) this.wTravel += Math.abs(dx);
+    else {
+      if (this.wTravel > this.unitPx * 2.5) this.pry();
+      this.wDir = dir;
+      this.wTravel = Math.abs(dx);
+    }
+  }
+
+  private pry() {
+    if (this.slipCool > 0) return;
+    this.total++;
+    if (this.force > this.zoneB) {
+      this.slip();
+      return;
+    }
+    const inside = this.force >= this.zoneA;
+    if (inside) this.inZone++;
+    this.progress += inside ? 0.15 : 0.05;
+    audio.play('scrape', inside ? 0.5 : 0.25);
+    this.haptic(inside ? 10 : 4);
+    this.fx.splash(this.worldOf(this.tmpV.set(-0.08, 0.035, 0)), '#cfc8b8', inside ? 3 : 1);
+    this.squash(this.oy.group, inside ? 0.06 : 0.03, 0.18);
+    if (this.progress >= 1) this.pop();
   }
 
   private slip() {
     this.slips++;
-    this.pressure = 0.2;
+    this.slipCool = 0.4;
+    this.force = 0.2;
     this.progress = Math.max(0, this.progress - 0.25);
+    this.haptic([30, 30, 50]);
+    this.hitStop(0.1);
     audio.play('scrape', 1.5);
     audio.play('bad', 0.5);
     this.eng.shake(0.7);
@@ -107,7 +165,11 @@ export class ShuckGame extends Minigame {
 
   private pop() {
     this.phase = 'cut';
+    this.pressing = false;
     audio.play('pop', 1.2);
+    this.haptic(20);
+    this.hitStop(0.08);
+    this.eng.shake(0.3);
     this.fx.splash(this.worldOf(new THREE.Vector3(-0.06, 0.04, 0)), '#dfe6e0', 6);
     this.oy.top.rotation.z = 0.12;
     this.gauge.el.style.display = 'none';
@@ -119,9 +181,12 @@ export class ShuckGame extends Minigame {
     this.swipeStart = null;
     audio.play('scrape');
     const top = this.oy.top;
+    this.haptic(12);
+    this.fx.sparkle(this.worldOf(this.tmpV.set(0, 0.05, 0)), '#ffffff', 10);
     await tween(0.3, (k) => (top.rotation.z = 0.12 + k * 1.9), ease.outBack);
     const ratio = this.total ? this.inZone / this.total : 0.5;
     const q = clamp(0.45 + ratio * 0.6 - this.slips * 0.15, 0.05, 1);
+    if (q >= 0.92) this.squash(this.oy.group, 0.15, 0.3);
     this.score(q, new THREE.Vector3(0, 0.07, 0));
     this.idx++;
     this.ui.setProgress(this.idx, this.count);
@@ -145,31 +210,21 @@ export class ShuckGame extends Minigame {
 
   protected update(dt: number) {
     if (this.phase === 'pry') {
-      // la franja deriva: la bisagra "se mueve" con la mano
-      this.zoneT += dt;
-      this.zoneC = 0.5 + Math.sin(this.zoneT * 1.3) * 0.18 + Math.sin(this.zoneT * 2.9) * 0.07;
-      const a = this.zoneC - this.zoneW / 2, b = this.zoneC + this.zoneW / 2;
-      if (this.eng.pointerDown) this.pressure += dt * 0.9;
-      else this.pressure -= dt * 0.8;
-      this.pressure = clamp(this.pressure, 0, 1.05);
-      const inside = this.pressure >= a && this.pressure <= b;
-      if (this.eng.pointerDown || this.pressure > 0.05) {
-        this.total += dt;
-        if (inside) {
-          this.inZone += dt;
-          this.progress += dt * 0.55;
-          if (Math.random() < 0.15) audio.play('scrape', 0.3);
-        }
-      }
-      if (this.pressure >= 1.0) this.slip();
-      this.gauge.set(Math.min(1, this.pressure), a, b);
+      this.slipCool = Math.max(0, this.slipCool - dt);
+      // sin meneo la fuerza cae: hay que mantener el ritmo
+      this.force = Math.max(0, this.force - dt * (this.pressing ? 1.1 : 2.5));
+      this.wiggle *= Math.exp(-(this.pressing ? 3 : 8) * dt);
+      const inside = this.force >= this.zoneA && this.force <= this.zoneB;
+      this.gauge.set(Math.min(1, this.force), this.zoneA, this.zoneB);
       this.gauge.setLabel(`palanca ${Math.round(clamp(this.progress) * 100)}%`);
-      this.gauge.el.classList.toggle('hot', inside);
-      if (this.progress >= 1) this.pop();
-      // cuchillo en la bisagra, vibrando con la presión
-      const j = this.pressure * 0.004;
-      this.knife.position.set(-0.11 + this.pressure * 0.03 + rand(-j, j), 0.035, 0.0 + rand(-j, j));
-      this.knife.rotation.set(0, 0, -0.1 - this.pressure * 0.2);
+      this.gauge.el.classList.toggle('hot', inside && this.pressing);
+      // cuchillo clavado en la bisagra: entra al presionar, gira con el meneo
+      const seat = this.pressing ? 1 : 0;
+      const j = this.force * 0.002;
+      this.knife.position.set(-0.12 + seat * 0.02 + this.progress * 0.012 + rand(-j, j), 0.035 + (1 - seat) * 0.02, rand(-j, j));
+      this.knife.rotation.set(0, this.wiggle, -0.1 - seat * 0.15 - this.progress * 0.1);
+      // la valva superior cede poco a poco
+      this.oy.top.rotation.z = this.progress * 0.08 + Math.abs(this.wiggle) * 0.05;
       const sp = this.eng.toScreen(this.worldOf(this.tmpV.set(0, 0.0, 0.12)));
       this.gauge.el.style.transform = `translate(${sp.x}px, ${sp.y}px)`;
     }

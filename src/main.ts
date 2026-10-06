@@ -12,6 +12,9 @@ import { audio } from './core/audio';
 import { DAY_NAMES, LAST_DAY } from './game/tasks';
 import { mats } from './world/materials';
 import * as P from './world/props';
+import { Input } from './core/input';
+import { Player } from './world/player';
+import { setupRendering } from './world/render';
 
 /** Compila de antemano los shaders de todos los materiales para que no haya tirones al abrir una estación. */
 async function warmup(eng: Engine) {
@@ -43,7 +46,14 @@ async function boot() {
     throw e;
   }
   const fx = new FX(eng.scene);
+  setupRendering(eng);
   const dir = new Director(eng, kitchen, fx, ui);
+  const input = new Input(eng, ui.root);
+  input.enabled = false;
+  const player = new Player(eng, kitchen, input);
+  player.enabled = false;
+  player.teleport(-2.8, 3.6, Math.PI);
+  dir.attach(player, input);
   eng.setView(OVERVIEW);
   eng.camera.position.copy(OVERVIEW.pos);
   eng.camera.lookAt(OVERVIEW.look);
@@ -53,14 +63,17 @@ async function boot() {
   let titleT = 0;
   let onTitle = true;
   eng.start((dt) => {
+    input.update(dt);
+    player.update(dt);
     kitchen.update(dt, performance.now() / 1000);
     fx.update(dt, eng.camera);
     dir.update(dt);
     if (onTitle) {
       // cámara lenta recorriendo la cocina detrás del menú
       titleT += dt * 0.06;
-      const r = 3.4;
-      eng.setView({ pos: new THREE.Vector3(Math.sin(titleT) * r * 0.9, 1.75, Math.cos(titleT) * r * 0.7 + 0.6), look: new THREE.Vector3(0, 1.0, -1.2), fov: 66 });
+      // vista elevada girando lentamente sobre la cocina (estilo diorama)
+      const r = 5.2;
+      eng.setView({ pos: new THREE.Vector3(Math.sin(titleT) * r * 0.95, 4.6, Math.cos(titleT) * r * 0.75 + 0.4), look: new THREE.Vector3(0, 0.7, -0.4), fov: 55 });
     }
   });
 
@@ -78,6 +91,9 @@ async function boot() {
 
   function title() {
     onTitle = true;
+    eng.setFollow(null);
+    player.enabled = false;
+    input.enabled = false;
     ui.showHud(false);
     const s = dir.save;
     const days = Array.from({ length: LAST_DAY }, (_, i) => i + 1)
@@ -153,7 +169,7 @@ async function boot() {
 
   title();
   document.getElementById('boot')?.remove();
-  (window as unknown as { __game: unknown }).__game = { eng, dir, kitchen, ui, start };
+  (window as unknown as { __game: unknown }).__game = { eng, dir, kitchen, ui, start, player, input };
 }
 
 boot().catch((e) => {

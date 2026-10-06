@@ -7,7 +7,8 @@ import { audio } from '../core/audio';
 import type { Gauge } from '../ui/ui';
 
 /**
- * Mantén presionado para servir; suelta dentro de la franja verde.
+ * La cuchara/cucharón sigue al puntero. Mantén presionado sobre el recipiente y arrastra hacia
+ * abajo para inclinarla: cuanto más inclinas, más rápido cae (analógico). Suelta en la franja.
  * caviar: porcionar latas en frascos para el servicio. stock: embolsar fondos.
  */
 export class FillGame extends Minigame {
@@ -16,7 +17,15 @@ export class FillGame extends Minigame {
   private idx = 0;
   private level = 0;
   private holding = false;
-  private holdT = 0;
+  private tilt = 0; // 0..1 (inclinación real, suavizada)
+  private tiltT = 0;
+  private refY = 0;
+  private spill = 0;
+  private spillMsgT = 0;
+  private stream: THREE.Mesh;
+  private aim = new THREE.Vector3(); // dónde apunta la cuchara (local, sobre la mesa)
+  private holdZ = 0;
+  private streamV = new THREE.Vector3(0, -0.4, 0);
   private zone: [number, number] = [0.7, 0.85];
   private fillMesh!: THREE.Mesh;
   private container!: THREE.Group;
@@ -45,6 +54,7 @@ export class FillGame extends Minigame {
       lid.position.set(0.24, 0.006, -0.2);
       this.group.add(lid);
       // cuchara de nácar
+      this.spoon.scale.setScalar(1.3);
       const bowl = new THREE.Mesh(new THREE.SphereGeometry(0.014, 12, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2), new THREE.MeshStandardMaterial({ color: '#f3efe6', roughness: 0.2, metalness: 0.3 }));
       const stick = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.003, 0.008), bowl.material);
       stick.position.x = -0.045;
@@ -63,13 +73,19 @@ export class FillGame extends Minigame {
       this.spoon.add(ladle, handle);
     }
     this.group.add(this.spoon);
+    // chorro visible: cilindro unitario que se estira del borde de la cuchara al nivel del líquido
+    const sGeo = new THREE.CylinderGeometry(1, 0.7, 1, 8, 1, true);
+    sGeo.translate(0, -0.5, 0);
+    this.stream = new THREE.Mesh(sGeo, this.kind === 'caviar' ? new THREE.MeshStandardMaterial({ color: '#1d2418', roughness: 0.3, metalness: 0.2 }) : PM.stock);
+    this.stream.visible = false;
+    this.group.add(this.stream);
     const sh = contactShadow(0.14, 0.14);
     sh.position.set(0.04, 0.001, 0.02);
     this.group.add(sh);
   }
 
   protected start() {
-    this.ui.setInstruction(this.kind === 'caviar' ? 'Mantén presionado para porcionar caviar. Suelta en la franja.' : 'Mantén presionado para servir el fondo en la bolsa. Suelta en la franja.');
+    this.ui.setInstruction(this.kind === 'caviar' ? 'Lleva la cuchara sobre el frasco, presiona y arrastra hacia abajo para inclinarla. Más inclinación = más caviar. Suelta en la franja.' : 'Lleva el cucharón sobre la bolsa, presiona y arrastra hacia abajo para verter. Más inclinación = más chorro. Suelta en la franja.');
     this.gauge = this.ui.gauge(true);
     this.spawn();
   }
@@ -96,6 +112,7 @@ export class FillGame extends Minigame {
     this.group.add(this.container);
     tween(0.3, (k) => (this.container.position.x = 0.25 - 0.21 * k), ease.outBack);
     this.level = 0;
+    this.spill = 0;
     const c = rand(0.68, 0.86);
     const w = this.ctx.day >= 4 ? 0.11 : 0.14;
     this.zone = [c - w / 2, c + w / 2];
@@ -108,14 +125,32 @@ export class FillGame extends Minigame {
   protected onDown() {
     if (this.busy) return;
     this.holding = true;
-    this.holdT = 0;
+    this.refY = this.eng.pointerPx.y;
+    this.holdZ = this.aim.z;
+    this.tiltT = 0;
+  }
+
+  protected onMove() {
+    if (!this.holding) return;
+    // inclinación analógica: distancia vertical arrastrada (hacia abajo) desde que presionaste
+    let dy = this.eng.pointerPx.y - this.refY;
+    if (dy < 0) {
+      this.refY += dy * 0.5; // si sube mucho, la referencia lo acompaña a medias
+      dy = 0;
+    }
+    this.tiltT = clamp(dy / (this.unitPx * 16));
   }
 
   protected onUp() {
     if (!this.holding) return;
     this.holding = false;
+    this.tiltT = 0;
     if (this.level < 0.05) return;
     this.evaluate();
+  }
+
+  private overJar() {
+    return Math.hypot(this.aim.x - 0.04, this.aim.z - 0.02) < (this.kind === 'caviar' ? 0.045 : 0.07);
   }
 
   private evaluate() {
@@ -126,8 +161,15 @@ export class FillGame extends Minigame {
     if (this.level > 1) q = 0;
     else if (this.level >= a && this.level <= b) q = 1 - (Math.abs(this.level - c) / half) * 0.25;
     else q = clamp(0.7 - (Math.min(Math.abs(this.level - a), Math.abs(this.level - b)) / 0.2) * 0.7, 0.05, 0.7);
+    q = clamp(q - this.spill * 1.5, 0, 1); // lo que cayó fuera cuesta
     this.score(q, new THREE.Vector3(0.04, this.height + 0.04, 0.02));
-    if (q >= 0.92) this.fx.sparkle(this.worldOf(new THREE.Vector3(0.04, this.height, 0.02)), '#fff6c8', 12);
+    if (q >= 0.92) {
+      this.fx.sparkle(this.worldOf(new THREE.Vector3(0.04, this.height, 0.02)), '#fff6c8', 12);
+      this.haptic(15);
+    }
+    this.squash(this.container, 0.12, 0.3);
+    this.holding = false;
+    this.tiltT = 0;
     audio.setLoop('stream', 0);
     this.idx++;
     this.ui.setProgress(this.idx, this.count);
@@ -149,35 +191,64 @@ export class FillGame extends Minigame {
   }
 
   protected update(dt: number) {
-    const ladlePos = this.ladlePos;
-    if (this.holding && !this.busy) {
-      this.holdT += dt;
-      // el chorro acelera cuanto más mantienes: hay que anticipar
-      const rate = (this.kind === 'caviar' ? 0.32 : 0.28) * (1 + this.holdT * 1.1);
-      this.level += rate * dt;
-      audio.setLoop('stream', this.kind === 'caviar' ? 0.05 : 0.2);
+    // la cuchara sigue al puntero (un poco por encima del dedo para que se vea)
+    const p = this.pointerLocal(this.height + 0.04, this.lv);
+    const ax = clamp(p.x, -0.3, 0.3);
+    const az = this.holding ? this.holdZ : clamp(p.z - 0.02, -0.25, 0.22);
+    this.aim.x += (ax - this.aim.x) * Math.min(1, dt * 18);
+    this.aim.z += (az - this.aim.z) * Math.min(1, dt * 18);
+    this.tilt += (this.tiltT - this.tilt) * Math.min(1, dt * 14);
+    const over = this.overJar();
+    let pouring = false;
+    if (this.holding && !this.busy && this.tilt > 0.06) {
+      pouring = true;
+      // caudal analógico: crece con la inclinación (no binario)
+      const rate = (this.kind === 'caviar' ? 0.55 : 0.5) * Math.pow(this.tilt, 1.4);
+      if (over) this.level += rate * dt;
+      else {
+        this.spill += rate * dt * 0.5;
+        this.spillMsgT -= dt;
+        if (this.spillMsgT <= 0) {
+          this.spillMsgT = 1.2;
+          this.popAt(this.lv.set(this.aim.x, 0.05, this.aim.z), '¡Fuera!', 'bad');
+          audio.play('bad', 0.3);
+        }
+        if (Math.random() < 0.5) this.fx.splash(this.worldOf(this.lv.set(this.aim.x, 0.005, this.aim.z), this.wv), this.kind === 'caviar' ? '#20271a' : '#c86a30', 1);
+      }
+      audio.setLoop('stream', (this.kind === 'caviar' ? 0.03 : 0.08) + this.tilt * (this.kind === 'caviar' ? 0.06 : 0.2));
       if (this.kind === 'caviar') {
-        if (Math.random() < 0.6) this.fx.emit({ pos: this.worldOf(this.lv.set(0.04, this.height + 0.03, 0.02), this.wv), count: 1, spread: 0.015, vel: new THREE.Vector3(0, -0.3, 0), life: 0.15, size: 0.006, color: '#20271a' });
-      } else if (Math.random() < 0.5) this.fx.splash(this.worldOf(this.lv.set(0.04, this.height * this.level + 0.02, 0.02), this.wv), '#c86a30', 1);
+        if (Math.random() < 0.3 + this.tilt * 0.6) this.fx.emit({ pos: this.worldOf(this.lv.set(this.aim.x, this.height + 0.03, this.aim.z), this.wv), count: 1, spread: 0.008, vel: this.streamV, life: 0.15, size: 0.006, color: '#20271a' });
+      } else if (over && Math.random() < 0.3 + this.tilt * 0.5) this.fx.splash(this.worldOf(this.lv.set(this.aim.x, this.height * this.level + 0.02, this.aim.z), this.wv), '#c86a30', 1);
       if (this.level > 1.0) {
         this.holding = false;
         this.level = 1.02;
         this.ui.toast(this.kind === 'caviar' ? 'Se desbordó: caviar en la mesa. Caro.' : 'Se desbordó la bolsa.', 'bad');
         this.fx.splash(this.worldOf(new THREE.Vector3(0.04, this.height, 0.02)), this.kind === 'caviar' ? '#20271a' : '#c86a30', 16);
+        this.eng.shake(0.4);
+        this.haptic(40);
         this.evaluate();
       }
-      ladlePos.set(0.04, this.height + 0.035, 0.02);
-    } else {
-      ladlePos.copy(this.srcPos);
-      ladlePos.y += this.kind === 'caviar' ? 0.08 : 0.22;
-      if (!this.holding) audio.setLoop('stream', 0);
+    } else if (!this.holding) audio.setLoop('stream', 0);
+    // pose de la cuchara: flota sobre el puntero y se inclina al verter
+    const lift = this.kind === 'caviar' ? 0.035 : 0.05;
+    this.ladlePos.set(this.aim.x, this.height + lift + (this.holding ? 0 : 0.015 + Math.sin(this.elapsed * 3) * 0.004), this.aim.z);
+    this.spoon.position.lerp(this.ladlePos, Math.min(1, dt * 20));
+    this.spoon.rotation.z = -this.tilt * 1.5;
+    this.spoon.rotation.x = (ax - this.aim.x) * 4; // balanceo al moverla
+    // chorro: del borde de la cuchara hasta el nivel del líquido (o la mesa si no hay frasco)
+    this.stream.visible = pouring;
+    if (pouring) {
+      const top = this.spoon.position.y - 0.005;
+      const bottom = over ? 0.003 + this.height * Math.min(1, this.level) : 0.002;
+      const r = (this.kind === 'caviar' ? 0.0025 : 0.004) + this.tilt * (this.kind === 'caviar' ? 0.004 : 0.008);
+      this.stream.position.set(this.spoon.position.x + 0.008, top, this.spoon.position.z);
+      this.stream.scale.set(r * (1 + Math.sin(this.elapsed * 40) * 0.12), Math.max(0.001, top - bottom), r);
     }
-    this.spoon.position.lerp(ladlePos, Math.min(1, dt * 14));
-    this.spoon.rotation.z = this.holding ? -0.6 : 0;
     const lv = Math.min(1, this.level);
     this.fillMesh.scale.y = Math.max(0.0001, this.height * lv);
     this.fillMesh.position.y = 0.003 + (this.height * lv) / 2;
     this.gauge.set(Math.min(1, this.level));
+    this.gauge.el.classList.toggle('hot', pouring && over);
     // posicionar el gauge junto al recipiente
     const sp = this.eng.toScreen(this.worldOf(this.lv.set(0.12, this.height / 2, 0.02), this.wv), this.sv);
     this.gauge.el.style.transform = `translate(${sp.x}px, ${sp.y}px)`;
