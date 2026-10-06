@@ -1,42 +1,81 @@
-# 🍳 Juego de Cocina
+# 🔪 Mise en Place NYC
 
-Prototipo de un juego de cocina contrarreloj para navegador. Llegan pedidos de clientes, armas cada plato con los ingredientes correctos y lo sirves antes de que se acabe la paciencia del cliente.
+Un día en la vida de un cocinero en un restaurante con estrella Michelin en Nueva York. Llegas a las 6:40 am, te pones la chaqueta, fichas y trabajas la lista de prep: caviar, trucha, pez espada ahumado, langostinos, fondo, la comida del personal, ostras, langostas, almejas y la limpieza final. Hay imprevistos, el chef te califica y a las 8:00 pm fichas la salida.
 
-## Cómo jugar
+Es un juego 3D para el navegador, hecho para correr fluido en el celular y en la compu. No descarga ni una imagen ni un sonido: todo se genera al vuelo.
 
-1. Abre `index.html` en cualquier navegador moderno (no hace falta instalar nada).
-2. Mira los pedidos que aparecen arriba: cada uno muestra la receta y una barra de tiempo.
-3. Haz clic en los ingredientes para ponerlos en el plato (el orden no importa).
-4. Pulsa **Servir**. Si el plato coincide con algún pedido, ganas puntos (más cuanto antes lo sirvas).
-5. Si un pedido se agota, pierdes una vida. Con 0 vidas termina la partida.
+## Jugar
 
-Atajos: **Espacio** sirve el plato, **Retroceso** quita el último ingrediente, **Esc** vacía el plato.
+```bash
+npm install
+npm run dev        # http://localhost:5173
+```
+
+Build de producción (sale en `dist/` y se puede servir como sitio estático):
+
+```bash
+npm run build
+npm run preview
+```
+
+### Controles
+
+| Acción | Cómo |
+|---|---|
+| Elegir tarea | Toca un ticket de la **lista de prep** |
+| Cortar | Toca o haz clic sobre la línea guía |
+| Servir o hacer palanca | Mantén presionado y suelta |
+| Cubrir o limpiar | Arrastra |
+| Separar | Desliza a lo largo de la línea |
+| Clasificar | Desliza, usa ← ↑ → o toca el destino |
+| Pausa | `Esc` o el botón ❚❚ |
+
+Parámetros de URL: `?webgl` fuerza WebGL2 (por defecto se usa WebGPU si está disponible).
+
+## Tecnología
+
+- **Three.js r186 + WebGPURenderer**, con fallback automático a WebGL2
+- **TypeScript 7** y **Vite 8**
+- Geometría, texturas (canvas) y audio (Web Audio API) 100% procedurales
+- Escena estática fusionada por material, instancing para latas y partículas, y resolución dinámica según el tiempo de frame
+- UI en HTML/CSS por encima del canvas, pensada primero para celular en vertical
+- PWA básica (manifest e ícono)
 
 ## Estructura
 
 ```
-juego-de-cocina/
-├── index.html          # Punto de entrada
-├── src/
-│   ├── recetas.js      # Ingredientes y recetas (datos del juego)
-│   ├── juego.js        # Lógica: pedidos, tiempo, puntaje, vidas
-│   └── estilos.css     # Estilos
-├── assets/             # Imágenes y sonidos (por ahora se usan emojis)
-├── docs/
-│   └── diseno.md       # Documento de diseño del juego
-└── README.md
+src/
+├── main.ts              # Arranque, pantallas (título, pausa, resumen)
+├── core/
+│   ├── engine.ts        # Renderer, cámara POV, input, resolución dinámica
+│   ├── audio.ts         # Sonido procedural
+│   └── tween.ts         # Animaciones y utilidades
+├── world/
+│   ├── kitchen.ts       # La cocina 3D y sus estaciones
+│   ├── cook.ts          # Cocineros y chef animados
+│   ├── props.ts         # Ingredientes y utensilios
+│   ├── materials.ts     # Materiales compartidos
+│   ├── textures.ts      # Texturas procedurales
+│   └── fx.ts            # Partículas (vapor, fuego, harina…)
+├── minigames/           # slice, fill, cook, pick, coat, sort, shuck, swipe, sequence
+├── game/
+│   ├── tasks.ts         # Agenda del día e imprevistos (sacados del video)
+│   ├── director.ts      # Reloj, tickets, cortes de tiempo, nota del chef
+│   ├── clock.ts
+│   └── save.ts          # Progreso en localStorage
+└── ui/                  # HUD, lista de prep, toasts y estilos
 ```
 
-## Añadir una receta
+El diseño completo y el análisis del video están en [`docs/diseno.md`](docs/diseno.md).
 
-Edita `src/recetas.js` y agrega un objeto a `RECETAS`:
+## Añadir una tarea
 
-```js
-{ nombre: "Ensalada", icono: "🥗", ingredientes: ["lechuga", "tomate", "queso"], puntos: 80 }
+Agrega una entrada a `TASKS` en `src/game/tasks.ts`:
+
+```ts
+{ id: 'mise2', title: 'Picar más zanahoria', caption: 'más mirepoix', icon: '🥕',
+  station: 'prep', kind: 'slice', params: { item: 'carrot', count: 2 },
+  at: hm(15, 0), window: 40, minDay: 2 }
 ```
 
-Los ingredientes deben existir en `INGREDIENTES`.
-
-## Próximos pasos
-
-Ver la hoja de ruta en [`docs/diseno.md`](docs/diseno.md).
+`kind` es uno de los 9 minijuegos y `params` ajusta su contenido (qué ingrediente, cuántos, etc.).

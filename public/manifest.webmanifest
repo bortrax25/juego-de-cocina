@@ -1,0 +1,11 @@
+{
+  "name": "Mise en Place NYC",
+  "short_name": "Mise en Place",
+  "description": "Un día en la vida de un cocinero en un restaurante con estrella Michelin en Nueva York.",
+  "start_url": "./",
+  "display": "fullscreen",
+  "orientation": "any",
+  "background_color": "#0e1116",
+  "theme_color": "#0e1116",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
